@@ -12,7 +12,7 @@ import itertools
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
-from .skills import BUILTIN_SKILLS, Skill, fill, match, state_satisfies, unify
+from .skills import BUILTIN_SKILLS, PLACEHOLDER, Skill, fill, match, state_satisfies, unify
 
 
 @dataclass
@@ -44,13 +44,41 @@ class GraphPlanner:
                 denied.add((e["dst"] or "").split(":", 1)[-1])
         return denied
 
-    def applicable(self, skill: Skill, state: Set[str]) -> bool:
-        return all(state_satisfies(state, p) for p in skill.precondition)
+    def applicable(self, skill: Skill, state: Set[str],
+                   params_all: Optional[Dict[str, Dict[str, str]]] = None) -> bool:
+        """前置可满足性。参数耦合前置（如 summary:{topic} / read:{path}）在目标参数已知时，
+        只认「同一参数值具体化后」的命中——防止别的话题/别的文件的断言串扰满足。
+        参数查找：先本技能参数映射，再全局合并（read_file.path 可满足 summarize 的 read:{path}）。"""
+        hint = dict((params_all or {}).get(skill.name) or {})
+        for m in (params_all or {}).values():  # 全局兜底：read_file.path 可满足 summarize 的 read:{path}
+            for k, v in (m or {}).items():
+                hint.setdefault(k, v)
+        for p in skill.precondition:
+            if PLACEHOLDER.search(p):
+                hinted = False
+                for ph in PLACEHOLDER.findall(p):
+                    val = hint.get(ph)
+                    if val is not None:
+                        hinted = True  # 参数已知 → 只认具体化命中
+                        concrete = PLACEHOLDER.sub(val, p)
+                        # 规划期抽象状态里的通配断言（read:*）可覆盖具体前置
+                        if not any(str(a) == concrete or (str(a).endswith("*") and concrete.startswith(str(a)[:-1]))
+                                   for a in state):
+                            return False
+                        break
+                if not hinted:  # 抽象规划（无参数提示）→ 通配/union 均可
+                    if not any(match(p, a) for a in state):
+                        return False
+                continue
+            if not state_satisfies(state, p):
+                return False
+        return True
 
     def goal_missing(self, state: Set[str], goal: List[str]) -> List[str]:
         return [g for g in goal if not any(match(a, g) for a in state)]
 
     def plan(self, goal: List[str], state: Set[str], store=None,
+             params_all: Optional[Dict[str, Dict[str, str]]] = None,
              max_states: int = 4000, max_depth: int = 10) -> Plan:
         """A* 搜索：状态 = frozenset(断言)，返回技能节点序列 = 计划。"""
         goal = [g for g in goal if g]
@@ -88,7 +116,7 @@ class GraphPlanner:
             if expansions > max_states or len(path) >= max_depth:
                 continue
             for sk in skills:
-                if not self.applicable(sk, set(st)):
+                if not self.applicable(sk, set(st), params_all):
                     continue
                 ns = apply(sk, set(st))
                 nf = frozenset(ns)

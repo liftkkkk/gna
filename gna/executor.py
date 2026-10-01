@@ -69,7 +69,7 @@ class TaskExecutor:
 
         # -- 规划（失败时不再徒劳重试；执行期的失败走局部重规划）--
         self._sync_health()
-        plan = self.planner.plan(goals, store.assertions(), store=store)
+        plan = self.planner.plan(goals, store.assertions(), store=store, params_all=params_all)
         if not plan.ok:
             store.be.update_node(task_id, {"attributes": {"status": "failed"}})
             yield {"t": "done", "ok": False, "task_id": task_id,
@@ -90,9 +90,9 @@ class TaskExecutor:
                 break
             params: Dict[str, str] = {**planned_params, **(params_all.get(skill_name) or {})}
 
-            # 1) 前置重核 → 局部重规划
+            # 1) 前置重核（与规划器同一判定，含参数耦合）→ 局部重规划
             cur = store.assertions()
-            if not all(state_satisfies(cur, p) for p in sk.precondition):
+            if not self.planner.applicable(sk, cur, params_all):
                 replans += 1
                 if replans > 2:
                     store.be.update_node(task_id, {"attributes": {"status": "failed"}})
@@ -101,7 +101,7 @@ class TaskExecutor:
                     return
                 yield {"t": "trace", "line": f"前置不满足（{skill_name}）→ 局部重规划（第{replans}次）"}
                 self._sync_health()
-                replan = self.planner.plan(goals, cur, store=store)
+                replan = self.planner.plan(goals, cur, store=store, params_all=params_all)
                 if not replan.ok:
                     store.be.update_node(task_id, {"attributes": {"status": "failed"}})
                     yield {"t": "done", "ok": False, "task_id": task_id,
@@ -140,7 +140,7 @@ class TaskExecutor:
                     return
                 yield {"t": "trace", "line": f"技能失败（{skill_name}）→ 局部重规划（第{replans}次）"}
                 self._sync_health()
-                replan = self.planner.plan(goals, store.assertions(), store=store)
+                replan = self.planner.plan(goals, store.assertions(), store=store, params_all=params_all)
                 if not replan.ok:
                     store.be.update_node(task_id, {"attributes": {"status": "failed"}})
                     yield {"t": "done", "ok": False, "task_id": task_id,

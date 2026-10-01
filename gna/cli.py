@@ -76,6 +76,10 @@ def cmd_chat(args) -> int:
         except (EOFError, KeyboardInterrupt):
             _print()
             break
+        except UnicodeDecodeError:
+            # 管道/重定向输入编码不一致时容错跳过（交互式控制台输入不受影响）
+            _print("  （输入编码无法解码，已跳过；控制台直接输入不受影响）")
+            continue
         if not line:
             continue
         low = line.lower()
@@ -178,8 +182,8 @@ def cmd_graph(args) -> int:
                 break
         _print(f"  （{hits[0]} 的 {args.direction} 邻居 ≤{n}）")
     elif args.action == "path":
-        a = store.entity_link(args.src, limit=1)
-        b = store.entity_link(args.dst, limit=1)
+        a = store.entity_link(args.node or "", limit=1)
+        b = store.entity_link(args.src or "", limit=1)
         if not a or not b:
             _print("  实体定位失败")
             return 1
