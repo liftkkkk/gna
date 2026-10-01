@@ -1,0 +1,11 @@
+# 最小运行依赖（anaconda 通常已自带 networkx）
+networkx>=3.0
+
+# 可选：接入真实大模型（不装则用 Mock 离线演示）
+openai>=1.40
+
+# 可选：图可视化 gna graph viz
+pyvis>=0.3
+
+# 开发
+pytest>=8.0

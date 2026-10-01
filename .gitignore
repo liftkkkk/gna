@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+.venv/
+
+# 运行时数据（存储默认在 ~/.gna）
+.gna/
+data/
+workspace/
+*.html
+!docs/*.html
+
+# IDE
+.idea/
+.vscode/

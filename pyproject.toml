@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gna-graph-native-agent"
+version = "0.1.0"
+description = "GNA · 图原生智能体运行时 —— 状态、记忆、技能、任务、约束、审计全部组织在同一张内存图上的 Agent Runtime"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "GNA Contributors" }]
+requires-python = ">=3.10"
+keywords = ["graph", "agent", "llm", "knowledge-graph", "graphrag", "graph-native"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "networkx>=3.0",
+]
+
+[project.optional-dependencies]
+llm = ["openai>=1.40"]
+viz = ["pyvis>=0.3"]
+semantic = ["sentence-transformers>=2.2"]
+dev = ["pytest>=8.0", "openai>=1.40", "pyvis>=0.3"]
+
+[project.scripts]
+gna = "gna.cli:main"
+
+[tool.setuptools]
+packages = ["gna"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
