@@ -24,7 +24,7 @@ from .skills import BUILTIN_SKILLS
 from .tools import ToolContext, build_tools, dispatch, sync_tool_nodes
 
 TASK_PATTERN = re.compile(
-    r"(写|做|生成|起草|整理|总结|输出).{0,12}(报告|简报|总结|摘要|要点)"
+    r"(写|做|生成|起草|整理|总结|输出).{0,20}(报告|简报|总结|摘要|要点)"
     r"|调研|帮我?整理|/任务")
 REACT_SYSTEM = """[角色:REACT] 你是图原生智能体 GNA：状态、记忆、证据全部在一张家里的图上。
 可用工具（action 取值）：
