@@ -58,6 +58,8 @@ def _render_event(ev: dict) -> None:
         _print(f"      [{mark}] {out}")
     elif t == "gate":
         _print(f"  【门控】{ev.get('message', '')} -> {'放行' if ev.get('allowed') else '拒绝'}")
+    elif t == "done":
+        _print(f"\nGNA> {ev.get('answer', '')}\n")
     elif t == "answer":
         _print(f"\nGNA> {ev['text']}\n")
 
@@ -212,7 +214,7 @@ def _visualize(store: RuntimeGraph, out: Optional[str]) -> Optional[str]:
     except ImportError:
         return None
     net = Network(height="720px", directed=True, bgcolor="#ffffff",
-                  font_color="#222222", cdn_resources="remote")
+                  font_color="#222222", cdn_resources="in_line")
     color = {"entity": "#4C9AFF", "fact": "#36B37E", "turn": "#F6A609", "task": "#6554C0",
              "step": "#8777D9", "result": "#00B8D9", "skill": "#FF5630", "tool": "#FF8B00",
              "constraint": "#BF2600", "goal": "#5243AA", "episode": "#B3B5B3"}
@@ -328,6 +330,14 @@ def cmd_llm(args) -> int:
     return 0
 
 
+def cmd_web(args) -> int:
+    from .web import launch
+
+    _print(f"GNA Web 启动：http://{args.host}:{args.port} （Ctrl+C 停止）")
+    launch(host=args.host, port=args.port, inbrowser=not args.no_browser)
+    return 0
+
+
 # ---------------------------------------------------------------- 入口 ----
 
 def build_parser() -> argparse.ArgumentParser:
@@ -392,6 +402,12 @@ def build_parser() -> argparse.ArgumentParser:
     l.add_argument("--base-url", dest="base_url")
     l.add_argument("--api-key", dest="api_key")
     l.set_defaults(fn=cmd_llm)
+
+    w = sub.add_parser("web", help="Gradio 网页界面")
+    w.add_argument("--host", default="127.0.0.1")
+    w.add_argument("--port", type=int, default=7860)
+    w.add_argument("--no-browser", action="store_true")
+    w.set_defaults(fn=cmd_web)
     return p
 
 
