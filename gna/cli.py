@@ -11,7 +11,8 @@ import sys
 from typing import List, Optional
 
 from .agent import AgentRuntime
-from .config import PROVIDER_PRESETS, Settings, load_settings, save_settings
+from .config import (PROVIDER_PRESETS, Settings, delete_profile, load_profiles,
+                     load_settings, save_settings, set_active_profile, upsert_profile)
 from .graph import RuntimeGraph
 from .llm import make_llm
 from .skills import BUILTIN_SKILLS, validate
@@ -307,8 +308,31 @@ def cmd_tool(args) -> int:
 def cmd_llm(args) -> int:
     s = load_settings()
     if args.action == "info":
+        data = load_profiles()
+        prof = next(p for p in data["profiles"] if p["id"] == data["active"])
+        _print(f"  当前方案：{prof['id']}（{prof.get('name', '')}）")
         _print(f"  provider={s.provider} model={s.model}")
         _print(f"  base_url={s.resolved_base_url() or '-'} key={'已配置' if s.resolved_api_key() else '未配置'}")
+        _print(f"  配置文件：~/.gna/models.json（重启自动加载）")
+    elif args.action == "profiles":
+        data = load_profiles()
+        for p in data["profiles"]:
+            mark = "  ← 当前" if p["id"] == data["active"] else ""
+            _print(f"  {p['id']:<20} {p.get('name', ''):<26} {p.get('model', ''):<16} {p.get('base_url') or '-'}{mark}")
+    elif args.action == "use":
+        data = set_active_profile(args.profile_id)
+        _print(f"  已启用方案：{data['active']}（已持久化，重启自动加载）")
+    elif args.action == "add":
+        import time as _t
+
+        pid = args.profile_id or f"profile-{int(_t.time())}"
+        upsert_profile({"id": pid, "name": args.name or pid, "provider": args.provider or "custom",
+                        "base_url": args.base_url or "", "api_key": args.api_key or "",
+                        "model": args.model or "", "temperature": 0.3})
+        _print(f"  已保存方案 {pid}；启用：gna llm use {pid}")
+    elif args.action == "remove":
+        delete_profile(args.profile_id)
+        _print(f"  已删除方案：{args.profile_id}")
     elif args.action == "test":
         llm = make_llm(s)
         try:
@@ -395,8 +419,10 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--json", dest="json")
     t.set_defaults(fn=cmd_tool)
 
-    l = sub.add_parser("llm", help="LLM 配置与连通性")
-    l.add_argument("action", choices=["info", "test", "set"])
+    l = sub.add_parser("llm", help="LLM 配置方案（多模型持久化）")
+    l.add_argument("action", choices=["info", "profiles", "use", "add", "remove", "test", "set"])
+    l.add_argument("profile_id", nargs="?")
+    l.add_argument("--name")
     l.add_argument("--provider")
     l.add_argument("--model")
     l.add_argument("--base-url", dest="base_url")
