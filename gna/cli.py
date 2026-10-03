@@ -362,6 +362,20 @@ def cmd_web(args) -> int:
     return 0
 
 
+def cmd_web_st(args) -> int:
+    import os
+
+    from streamlit.web import cli as stcli
+
+    app = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_st.py")
+    _print(f"GNA Streamlit 前端启动：http://{args.host}:{args.port} （Ctrl+C 停止）")
+    sys.argv = ["streamlit", "run", app,
+                "--server.address", args.host, "--server.port", str(args.port),
+                "--server.headless", "true" if args.no_browser else "false"]
+    stcli.main()
+    return 0
+
+
 # ---------------------------------------------------------------- 入口 ----
 
 def build_parser() -> argparse.ArgumentParser:
@@ -434,6 +448,12 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--port", type=int, default=7860)
     w.add_argument("--no-browser", action="store_true")
     w.set_defaults(fn=cmd_web)
+
+    w2 = sub.add_parser("web-st", help="Streamlit 网页界面（同一内核的另一视图）")
+    w2.add_argument("--host", default="127.0.0.1")
+    w2.add_argument("--port", type=int, default=8501)
+    w2.add_argument("--no-browser", action="store_true")
+    w2.set_defaults(fn=cmd_web_st)
     return p
 
 

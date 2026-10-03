@@ -26,6 +26,7 @@ dependencies = [
 llm = ["openai>=1.40"]
 viz = ["pyvis>=0.3"]
 web = ["gradio>=4.44", "pyvis>=0.3"]
+web-st = ["streamlit>=1.36"]
 semantic = ["sentence-transformers>=2.2"]
 dev = ["pytest>=8.0", "openai>=1.40", "pyvis>=0.3"]
 

@@ -28,7 +28,12 @@ python -m gna demo
 python -m gna chat            :: 交互式 REPL（/help 看命令）
 python -m gna graph stats     :: 图统计
 python -m gna graph viz       :: 生成交互式 HTML 可视化（需 pyvis）
+python -m gna web             :: Gradio 前端（http://127.0.0.1:7860）
+python -m gna web-st          :: Streamlit 前端（http://127.0.0.1:8501）——同一内核的另一视图
 ```
+
+> 双前端共享同一 headless 内核与 `~/.gna` 图存储；模型配置（多方案、持久化、热切换）见 `~/.gna/models.json`。
+> 注意：v0.2 增量持久化落地前，建议同一时间只用一个前端写入。
 
 接真实大模型（任选其一，其余走 OpenAI 兼容）：
 
