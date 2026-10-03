@@ -110,11 +110,6 @@ def refresh_all():
     return kg_preview_md(), stats_md(), facts_md(), events_md()
 
 
-def on_seed():
-    _bootstrap(get_rt())
-    return refresh_all()
-
-
 # ---------------------------------------------------------------- 对话 ----
 
 def on_send(text: str, hist: list, auto_gate: bool):
@@ -170,79 +165,63 @@ def _runtime_reload() -> None:
         _bootstrap(_HOLDER["rt"])
 
 
-def _dd_update():
-    data = load_profiles()
-    return gr.update(choices=[(p["id"], p.get("name") or p["id"]) for p in data["profiles"]],
-                     value=data["active"])
-
-
-def _profile_from_form(name, prov, model, base, key, temp) -> dict:
-    return {"name": (name or "").strip() or "未命名", "provider": prov, "model": (model or "").strip(),
-            "base_url": (base or "").strip(), "api_key": (key or "").strip(),
-            "temperature": float(temp)}
-
-
-def on_load_profile(pid):
-    data = load_profiles()
-    p = next((x for x in data["profiles"] if x["id"] == pid), data["profiles"][0])
-    st = f"已把方案「{p.get('name') or p['id']}」载入表单（尚未启用；点『✅ 直接启用所选方案』或保存后生效）"
-    return (gr.update(), p.get("name") or p["id"], p.get("provider", "custom"), p.get("model", ""),
-            p.get("base_url", ""), p.get("api_key", ""), float(p.get("temperature") or 0.3), st)
-
-
-def on_use_profile(pid):
+def on_model_selected(pid):
+    """下拉框选模型 = 立即切换并持久化（唯一的日常操作，0 按钮）。"""
     data = set_active_profile(pid)
     p = next(x for x in data["profiles"] if x["id"] == data["active"])
     _runtime_reload()
-    return (_dd_update(), p.get("name") or p["id"], p.get("provider", "custom"), p.get("model", ""),
-            p.get("base_url", ""), p.get("api_key", ""), float(p.get("temperature") or 0.3),
-            f"✅ 已启用「{p.get('name') or p['id']}」（{p.get('model')} @ {p.get('base_url') or 'Mock'}），运行时已重载。")
+    return (p.get("name") or p["id"], p.get("model", ""), p.get("base_url", ""),
+            p.get("api_key", ""), float(p.get("temperature") or 0.3),
+            f"✅ 已启用「{p.get('name') or p['id']}」（{p.get('model') or 'Mock'}），重启后自动加载。")
 
 
-def on_delete_profile(pid):
-    data = delete_profile(pid)
+def on_use_model(pid):
+    """启用所选模型：持久化 + 热重载（幂等）。"""
+    data = set_active_profile(pid if pid else load_profiles()["active"])
     p = next(x for x in data["profiles"] if x["id"] == data["active"])
     _runtime_reload()
-    return (_dd_update(), p.get("name") or p["id"], p.get("provider", "custom"), p.get("model", ""),
-            p.get("base_url", ""), p.get("api_key", ""), float(p.get("temperature") or 0.3),
-            f"🗑 已删除「{pid}」，当前启用「{p.get('name') or p['id']}」。")
+    return f"✅ 已启用「{p.get('name') or p['id']}」（{p.get('model') or 'Mock'}），重启后自动加载。"
 
 
-def on_save_current(pid, name, prov, model, base, key, temp):
-    p = _profile_from_form(name, prov, model, base, key, temp)
-    p["id"] = pid  # 保持方案 ID 不变，仅更新内容
-    data = upsert_profile(p)
-    set_active_profile(pid)
+def on_save_profile(name, model, base, key, temp):
+    """保存 = 按名称新增或覆盖；保存的是当前启用方案时即时生效。"""
+    pname = (name or "").strip()
+    if not pname:
+        return gr.update(), name, model, base, key, float(temp), "❌ 请先填「方案名称」"
+    provider = "mock" if not (base or "").strip() else "custom"
+    upsert_profile({"id": pname, "name": pname, "provider": provider, "model": (model or "").strip(),
+                    "base_url": (base or "").strip(), "api_key": (key or "").strip(),
+                    "temperature": float(temp)})
+    data = load_profiles()
+    note = "（当前启用，已即时生效）" if data["active"] == pname else f"（已保存；上方下拉选择即可启用）"
+    return (gr.update(choices=[(x.get("name") or x["id"], x["id"]) for x in data["profiles"]],
+                      value=data["active"]),
+            name, model, base, key, float(temp), f"💾 已保存「{pname}」{note}")
+
+
+def on_delete_profile(name, model, base, key, temp):
+    pname = (name or "").strip()
+    data = delete_profile(pname) if pname else load_profiles()
+    p = next(x for x in data["profiles"] if x["id"] == data["active"])
     _runtime_reload()
-    return (_dd_update(), p["name"], p["provider"], p["model"], p["base_url"], p["api_key"],
-            p["temperature"],
-            f"💾 已保存到方案「{pid}」并启用（{p['model']} @ {p['base_url'] or 'Mock'}）。")
+    return (gr.update(choices=[(x.get("name") or x["id"], x["id"]) for x in data["profiles"]],
+                      value=data["active"]),
+            p.get("name") or p["id"], p.get("model", ""), p.get("base_url", ""),
+            p.get("api_key", ""), float(p.get("temperature") or 0.3),
+            f"🗑 已删除「{pname}」，当前启用「{p.get('name') or p['id']}」。")
 
 
-def on_save_new(name, prov, model, base, key, temp):
-    p = _profile_from_form(name, prov, model, base, key, temp)
-    if not p["name"] or p["name"] == "未命名":
-        return _dd_update(), name, prov, model, base, key, float(temp), "❌ 请先填写方案名称"
-    p["id"] = p["name"]
-    upsert_profile(p)
-    set_active_profile(p["id"])
-    _runtime_reload()
-    return (_dd_update(), p["name"], p["provider"], p["model"], p["base_url"], p["api_key"],
-            p["temperature"],
-            f"➕ 已另存为新方案「{p['name']}」并启用。")
-
-
-def on_test(name, prov, model, base, key, temp):
+def on_test_profile(name, model, base, key, temp):
     s = load_settings()
-    p = _profile_from_form(name, prov, model, base, key, temp)
-    s.provider, s.model, s.base_url = p["provider"], p["model"], p["base_url"]
-    s.api_key, s.temperature = p["api_key"], p["temperature"]
+    s.provider = "mock" if not (base or "").strip() else "custom"
+    s.model, s.base_url = (model or "").strip(), (base or "").strip()
+    s.api_key, s.temperature = (key or "").strip(), float(temp)
     from .llm import make_llm
 
     try:
         out = make_llm(s).chat([{"role": "system", "content": "[角色:PING]"},
                                 {"role": "user", "content": "回复两个字：连通"}], temperature=0.0)
-        return f"✅ 连通（{p['model']}）：{out[:40]}"
+        return f"✅ 连通（{s.model}）：{out[:40]}"
     except Exception as e:  # noqa: BLE001
         return f"❌ 失败：{e}"
 
@@ -250,75 +229,64 @@ def on_test(name, prov, model, base, key, temp):
 # ---------------------------------------------------------------- 组装 ----
 
 def build_demo() -> gr.Blocks:
-    rt = get_rt()
-    prof = load_profiles()
-    prof = next(p for p in prof["profiles"] if p["id"] == prof["active"])
+    get_rt()
     with gr.Blocks(title="GNA · 图原生智能体", theme=gr.themes.Soft()) as demo:
         gr.Markdown("# 🕸 GNA · 图原生智能体运行时　`一切皆图 · 查找皆遍历 · 变更留痕`")
-        with gr.Tab("💬 对话"):
-            with gr.Row():
-                with gr.Column(scale=3):
-                    chat = gr.Chatbot(type="messages", height=470, label="GNA",
-                                      show_copy_button=True)
-                    msg = gr.Textbox(show_label=False, placeholder=(
-                        "试试：记住：张三是李四的同事 ｜ 你在图谱里记得什么 ｜ "
-                        "帮我算一下 (365*3+17)/4 ｜ 写一份关于图神经网络的简报并验证 ｜ /任务 强制走图规划"))
+        with gr.Tabs() as tabs:
+            with gr.Tab("💬 对话"):
+                with gr.Row():
+                    with gr.Column(scale=3):
+                        chat = gr.Chatbot(type="messages", height=470, label="GNA",
+                                          show_copy_button=True)
+                        msg = gr.Textbox(show_label=False, placeholder=(
+                            "试试：记住：张三是李四的同事 ｜ 你在图谱里记得什么 ｜ "
+                            "帮我算一下 (365*3+17)/4 ｜ 写一份关于图神经网络的简报并验证 ｜ /任务 强制走图规划"))
+                        with gr.Row():
+                            send = gr.Button("发送", variant="primary")
+                            clr = gr.Button("清空对话")
+                        auto_gate = gr.Checkbox(value=True, label="自动确认写盘门控")
+                    with gr.Column(scale=2):
+                        trace = gr.Markdown("### 🧭 运行轨迹\n（发送消息后显示：召回 → 路由 → 工具/计划 → ΔW 写回）")
+            with gr.Tab("🌐 图谱世界"):
+                kg = gr.Markdown(kg_preview_md())
+                stats = gr.Markdown(stats_md())
+                facts = gr.Markdown(facts_md())
+            with gr.Tab("📜 执行审计（ΔW 事件链）"):
+                audit = gr.Markdown(events_md())
+                gr.Markdown("> 一切变更皆事件：回放 = 沿 next 边遍历；CLI `gna memory rollback` 可补偿回滚。")
+            with gr.Tab("⚙️ 模型设置"):
+                gr.Markdown("方案保存在 `~/.gna/models.json`，开机自动加载。")
+                with gr.Row():
+                    prof_dd = gr.Dropdown(
+                        choices=[(p.get("name") or p["id"], p["id"]) for p in load_profiles()["profiles"]],
+                        value=load_profiles()["active"], label="当前模型", scale=4)
+                    use_b = gr.Button("启用", variant="primary", scale=1)
+                status = gr.Markdown("")
+                with gr.Accordion("添加 / 修改 / 删除模型", open=False):
                     with gr.Row():
-                        send = gr.Button("发送", variant="primary")
-                        clr = gr.Button("清空对话")
-                    auto_gate = gr.Checkbox(value=True,
-                                            label="人工门控自动放行（取消后写盘类动作将被拒绝并在轨迹说明）")
-                with gr.Column(scale=2):
-                    trace = gr.Markdown("### 🧭 运行轨迹\n（发送消息后显示：召回 → 路由 → 工具/计划 → ΔW 写回）")
-        with gr.Tab("🌐 图谱世界"):
-            with gr.Row():
-                refresh = gr.Button("🔄 刷新视图")
-                seed = gr.Button("📦 载入示例数据")
-            kg = gr.Markdown(kg_preview_md())
-            stats = gr.Markdown(stats_md())
-            facts = gr.Markdown(facts_md())
-        with gr.Tab("📜 执行审计（ΔW 事件链）"):
-            audit = gr.Markdown(events_md())
-            gr.Markdown("> 一切变更皆事件：回放 = 沿 next 边遍历；CLI `gna memory rollback` 可补偿回滚。")
-        with gr.Tab("⚙️ 设置（LLM 接入 · 多模型配置）"):
-            gr.Markdown("**配置方案**保存在 `~/.gna/models.json`，开机/重启自动加载；可存多个模型，随时切换。")
-            prof_dd = gr.Dropdown(
-                choices=[(p["id"], p.get("name") or p["id"]) for p in load_profiles()["profiles"]],
-                value=load_profiles()["active"], label="配置方案（当前启用）", scale=2)
-            with gr.Row():
-                load_p = gr.Button("⬅️ 载入所选方案到表单")
-                use_p = gr.Button("✅ 直接启用所选方案", variant="primary")
-                del_p = gr.Button("🗑 删除所选")
-            with gr.Row():
-                name_tb = gr.Textbox(value=prof.get("name") or prof["id"], label="方案名称（另存为新方案的 ID）", scale=1)
-                prov = gr.Dropdown(choices=list(PROVIDER_PRESETS), value=prof.get("provider", "custom"),
-                                   label="提供商", scale=1)
-                model = gr.Textbox(value=prof.get("model", ""), label="模型", scale=1)
-            base = gr.Textbox(value=prof.get("base_url", ""), label="Base URL（兼容 OpenAI 协议）")
-            key = gr.Textbox(value=prof.get("api_key", ""), label="API Key（明文存于本机 models.json）",
-                             type="password")
-            temp = gr.Slider(0, 1, value=float(prof.get("temperature") or 0.3), step=0.1, label="温度")
-            with gr.Row():
-                test = gr.Button("🧪 用表单值测试连通")
-                save_cur = gr.Button("💾 把表单保存到当前方案并启用")
-                save_new = gr.Button("➕ 另存为新方案并启用")
-            status = gr.Markdown("")
+                        name_tb = gr.Textbox(label="方案名称", scale=1)
+                        model_tb = gr.Textbox(label="模型名", scale=1)
+                    base = gr.Textbox(label="API 地址（留空 = 离线 Mock）",
+                                      value="https://api.z.ai/api/paas/v4")
+                    key = gr.Textbox(label="API Key", type="password")
+                    temp = gr.Slider(0, 1, value=0.3, step=0.1, label="温度")
+                    with gr.Row():
+                        save_b = gr.Button("保存", variant="primary")
+                        test_b = gr.Button("测试连通")
+                        del_b = gr.Button("删除")
 
-            FORM = [name_tb, prov, model, base, key, temp]
-            SET_OUT = [prof_dd, name_tb, prov, model, base, key, temp, status]
-            test.click(on_test, FORM, [status])
-            save_cur.click(on_save_current, [prof_dd] + FORM, SET_OUT)
-            save_new.click(on_save_new, FORM, SET_OUT)
-            load_p.click(on_load_profile, [prof_dd], SET_OUT)
-            use_p.click(on_use_profile, [prof_dd], SET_OUT)
-            del_p.click(on_delete_profile, [prof_dd], SET_OUT)
+                FORM = [name_tb, model_tb, base, key, temp]
+                use_b.click(on_use_model, [prof_dd], [status])
+                prof_dd.change(on_model_selected, [prof_dd], FORM + [status])
+                save_b.click(on_save_profile, FORM, [prof_dd] + FORM + [status])
+                test_b.click(on_test_profile, FORM, [status])
+                del_b.click(on_delete_profile, FORM, [prof_dd] + FORM + [status])
 
         out_all = [msg, chat, trace, kg, stats, facts, audit]
         send.click(on_send, [msg, chat, auto_gate], out_all)
         msg.submit(on_send, [msg, chat, auto_gate], out_all)
         clr.click(lambda: [], None, [chat])
-        refresh.click(lambda: refresh_all(), None, [kg, stats, facts, audit])
-        seed.click(on_seed, None, [kg, stats, facts, audit])
+        tabs.select(lambda: refresh_all(), None, [kg, stats, facts, audit])
     return demo
 
 
