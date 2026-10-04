@@ -227,7 +227,9 @@ def _visualize(store: RuntimeGraph, out: Optional[str]) -> Optional[str]:
     for e in store.be.find_edges():
         net.add_edge(e["src"], e["dst"], title=e.get("label") or "")
     out = out or "gna_graph.html"
-    net.write_html(out, open_browser=False)
+    html = net.generate_html()
+    with open(out, "w", encoding="utf-8") as f:  # 显式 UTF-8：pyvis write_html 走系统默认编码，GBK 控制台下会炸
+        f.write(html)
     return out
 
 
