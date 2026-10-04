@@ -26,13 +26,16 @@ from .tools import ToolContext, build_tools, dispatch, sync_tool_nodes
 TASK_PATTERN = re.compile(
     r"(写|做|生成|起草|整理|总结|输出).{0,20}(报告|简报|总结|摘要|要点)"
     r"|调研|帮我?整理|/任务")
-REACT_SYSTEM = """[角色:REACT] 你是图原生智能体 GNA：状态、记忆、证据全部在一张家里的图上。
+REACT_SYSTEM = """[角色:REACT] 你是图原生智能体 GNA：状态、记忆、证据全部在一张家里的图上。你不只是聊天——你能直接干活：写文件、写程序、运行程序、根据报错自我修复。
 可用工具（action 取值）：
 {tools}
+工作方式：
+  1) 收到多步任务先在 thought 里给出简短步骤计划（建什么文件、怎么验证），再逐步执行；
+  2) 写代码任务：用 write_file 把程序写到 workspace 内（如 scripts/xxx.py），用 run_python 运行；若 stderr 有报错，修复代码重写重跑，直至成功；或用 run_code 一步写入并运行；
+  3) 一次只调一个工具；观察结果会以 OBSERVATION: 前缀回给你；引用事实时注明来源。
 输出协议：只输出一个 JSON 对象——
   需要工具：{{"thought": "简短理由", "action": "工具名", "action_input": {{...}}}}
-  直接回答：{{"thought": "简短理由", "final": "给用户的完整回答"}}
-规则：一次只调一个工具；观察结果会以 OBSERVATION: 前缀回给你；引用事实时注明来源。"""
+  直接回答：{{"thought": "简短理由", "final": "给用户的完整回答"}}"""
 
 
 class AgentRuntime:

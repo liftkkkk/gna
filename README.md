@@ -15,6 +15,7 @@ GNA 是一个 **agent runtime**：把 Agent 的**状态、记忆、技能、任�
 | **证据链在图上可追溯** | 每个节点/边携带 `ts + source`；结论沿 `produced/states` 边回溯到回合或工具返回 |
 | **行动与技能可机器验证** | 技能节点携带前置/效果**断言模板**，执行前后自动核对（支持通配/参数合一） |
 | **约束在搜索前生效** | 约束节点经 `constrains` 边声明 `deny_skill:`（规划前封锁）/ `restrict:`（沙箱强制）/ `gate:`（人工门控） |
+| **能直接干活（执行型）** | `run_code`（写入并运行）/ `run_python`：LLM 生成的程序落盘 `workspace/scripts/`、子进程执行（60s 超时）、输出回传，报错自我修复；每次执行以 `tool_call` 事件与 `written:/ran:` 断言上图 |
 
 ## 30 秒上手
 

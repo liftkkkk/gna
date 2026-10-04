@@ -26,7 +26,7 @@ def test_derive_enables_shapes():
 
 def test_skill_graph_validate():
     rep = validate(None, BUILTIN_SKILLS)
-    assert rep["skills"] == 13 and rep["edges"] >= 12
+    assert rep["skills"] == 15 and rep["edges"] >= 14
     assert rep["acyclic"] and rep["components"] == 1  # 连通无环（8.8 验证②）
 
 

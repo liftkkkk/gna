@@ -41,7 +41,7 @@ def test_memory_query(tmp_env, capsys):
 def test_skill_validate(tmp_env, capsys):
     assert run(["--storage", str(tmp_env["tmp"] / "s.json"), "skill", "validate"]) == 0
     out = capsys.readouterr().out
-    assert "skills=13" in out and "acyclic=True" in out
+    assert "skills=15" in out and "acyclic=True" in out
 
 
 def test_tool_call(tmp_env, capsys):

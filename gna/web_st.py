@@ -50,7 +50,7 @@ def page_chat(auto_gate: bool) -> None:
             st.markdown(m["content"])
 
     prompt = st.chat_input(
-        "试试：记住：张三是李四的同事 ｜ 帮我算一下 (365*3+17)/4 ｜ 写一份关于图神经网络的简报并验证")
+        "试试：记住：张三是李四的同事 ｜ 帮我算一下 (365*3+17)/4 ｜ 写个程序输出斐波那契前10项并运行 ｜ 写一份关于图神经网络的简报并验证")
     if not prompt:
         return
 

@@ -73,7 +73,53 @@ def _t_write_file(ctx: ToolContext, path: str, content: str) -> ToolResult:
     p = ctx.resolve(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
-    return True, f"已写入 {len(content)} 字符 → {p.relative_to(ctx.workspace.resolve())}"
+    rel = _rel(ctx, p)
+    ctx.store.add_assertion(f"written:{rel}", source=ctx.source)
+    ctx.store._emit("tool_call", ctx.source, {"tool": "write_file", "path": rel, "bytes": len(content)})
+    return True, f"已写入 {len(content)} 字符 → {rel}"
+
+
+def _rel(ctx: ToolContext, p: Path) -> str:
+    """workspace 内相对路径（POSIX 风格）。"""
+    return p.relative_to(ctx.workspace.resolve()).as_posix()
+
+
+def _t_run_python(ctx: ToolContext, path: str, timeout: float = 60) -> ToolResult:
+    """运行 workspace 内的 Python 脚本（子进程执行，捕获 stdout/stderr，超时保护）。"""
+    import subprocess
+    import sys as _sys
+
+    p = ctx.resolve(path)
+    if not p.is_file():
+        return False, f"文件不存在：{path}（先用 write_file 写入）"
+    try:
+        proc = subprocess.run([_sys.executable, str(p)], cwd=str(ctx.workspace.resolve()),
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=float(timeout))
+        out = (proc.stdout or "") + (("\n[stderr] " + proc.stderr) if proc.stderr.strip() else "")
+        ok = proc.returncode == 0
+        rel = _rel(ctx, p)
+        ctx.store.add_assertion(f"ran:{rel}", source=ctx.source)
+        ctx.store._emit("tool_call", ctx.source,
+                        {"tool": "run_python", "path": rel, "ok": ok, "returncode": proc.returncode})
+        return ok, (out.strip() or f"(退出码 {proc.returncode}，无输出)")[:4000]
+    except subprocess.TimeoutExpired:
+        return False, f"执行超时（>{timeout}s），已终止"
+    except Exception as e:  # noqa: BLE001
+        return False, f"执行异常：{type(e).__name__}: {e}"
+
+
+def _t_run_code(ctx: ToolContext, code: str, filename: str = "", timeout: float = 60) -> ToolResult:
+    """写入并运行一段 Python 代码（写程序一步到位：落盘 scripts/ 下 → 子进程执行）。"""
+    fname = (filename or f"code_{datetime.now().strftime('%H%M%S')}.py").strip()
+    if not fname.endswith(".py"):
+        fname += ".py"
+    rel_path = f"scripts/{fname}" if not fname.startswith("scripts/") else fname
+    ok_w, out_w = _t_write_file(ctx, rel_path, code)
+    if not ok_w:
+        return False, out_w
+    ok_r, out_r = _t_run_python(ctx, rel_path, timeout=timeout)
+    return ok_r, f"{out_w}\n--- 运行输出 ---\n{out_r}"
 
 
 _SAFE_FUNCS = {"sqrt": math.sqrt, "sin": math.sin, "cos": math.cos, "tan": math.tan,
@@ -260,6 +306,8 @@ def build_tools(ctx: ToolContext) -> Dict[str, Tool]:
         T("list_dir", "列出 workspace 目录内容", {"path": {"type": "string", "required": False, "desc": "相对路径，默认 ."}}, _t_list_dir),
         T("read_file", "读取 workspace 内文本文件", {"path": {"type": "string", "required": True, "desc": "相对路径"}}, _t_read_file),
         T("write_file", "写入 workspace 内文本文件（沙箱）", {"path": {"type": "string", "required": True}, "content": {"type": "string", "required": True}}, _t_write_file, perm="sandbox-write"),
+        T("run_python", "运行 workspace 内的 Python 脚本（子进程，60s 超时）", {"path": {"type": "string", "required": True}, "timeout": {"type": "number", "required": False}}, _t_run_python, perm="sandbox-write"),
+        T("run_code", "写入并运行一段 Python 代码（一步到位，输出回传）", {"code": {"type": "string", "required": True}, "filename": {"type": "string", "required": False}, "timeout": {"type": "number", "required": False}}, _t_run_code, perm="sandbox-write"),
         T("calculate", "安全算术求值", {"expression": {"type": "string", "required": True}}, _t_calculate),
         T("current_time", "当前时间", {}, _t_current_time),
         T("query_graph", "图记忆检索（激活扩散召回子图）", {"query": {"type": "string", "required": True}}, _t_query_graph),

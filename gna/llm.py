@@ -140,11 +140,26 @@ class MockLLM(BaseLLM):
     def _react(self, messages: List[Message], user: str) -> str:
         last_obs = next((m["content"] for m in reversed(messages)
                          if m["role"] == "user" and m["content"].startswith("OBSERVATION:")), "")
+        # 有效输入 = 本轮用户原始请求（在含「用户输入：」的消息里；最后一条 user 可能是 OBSERVATION）
+        orig = next((m["content"] for m in reversed(messages) if "用户输入：" in m["content"]), "")
+        eff = orig.split("用户输入：", 1)[-1] if orig else user
+        # 编码多步流：中间观察不收敛，继续写→跑→汇报
+        if re.search(r"写.{0,12}(程序|代码|脚本)|编程", eff):
+            if not last_obs:
+                return json.dumps({"thought": "计划：1)写入 scripts/fib.py 2)运行验证 3)汇报",
+                                   "action": "write_file",
+                                   "action_input": {"path": "scripts/fib.py",
+                                                    "content": "print('fib:', [1, 1, 2, 3, 5, 8, 13, 21, 34, 55])"}},
+                                  ensure_ascii=False)
+            if "已写入" in last_obs:
+                return json.dumps({"thought": "运行验证", "action": "run_python",
+                                   "action_input": {"path": "scripts/fib.py"}}, ensure_ascii=False)
+            return json.dumps({"thought": "运行成功，汇报产出",
+                               "final": "已创建 scripts/fib.py 并运行成功，输出：" + last_obs[:160]},
+                              ensure_ascii=False)
         if last_obs:
             body = last_obs.replace("OBSERVATION:", "", 1).strip()
             return json.dumps({"thought": "已获得工具结果，整理作答", "final": body[:1200]}, ensure_ascii=False)
-        # 有效输入 = 「用户输入：」之后的正文（前面是图记忆上下文）
-        eff = user.split("用户输入：", 1)[-1] if "用户输入：" in user else user
         if re.search(r"\d+\s*[\+\-\*/×÷]\s*\d+", eff):
             cands = re.findall(r"[\d\.\+\-\*/×÷\(\)\s%]+", eff)
             expr = next((c.strip() for c in sorted(cands, key=len, reverse=True)
