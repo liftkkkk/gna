@@ -54,7 +54,7 @@ class AgentRuntime:
 
     # ================================================================ 对话 ====
     def chat_turn(self, text: str, confirm: Optional[ConfirmCallback] = None,
-                  history: Optional[List[dict]] = None) -> Generator[dict, None, None]:
+                  history: Optional[List[dict]] = None, allow_write: bool = True) -> Generator[dict, None, None]:
         text = (text or "").strip()
         if not text:
             return
@@ -74,7 +74,7 @@ class AgentRuntime:
         if forced_task or TASK_PATTERN.search(text):
             yield from self._task_engine(body, confirm, turn_id)
         else:
-            yield from self._react_engine(text, ctx, history or [], turn_id)
+            yield from self._react_engine(text, ctx, history or [], turn_id, allow_write=allow_write)
 
         # (4) 本轮知识入图
         stat = ingest(store, self.llm, text, turn_id=turn_id, source=f"第{store._turn_seq}轮抽取")
@@ -97,12 +97,14 @@ class AgentRuntime:
             self.store.add_edge(turn_id, result.get("task_id", ""), "triggered", "路由")
 
     # ------------------------------------------------------------ ReAct 引擎 ----
-    def _react_engine(self, text: str, ctx: str, history: List[dict], turn_id: str) -> Generator[dict, None, None]:
+    def _react_engine(self, text: str, ctx: str, history: List[dict], turn_id: str,
+                      allow_write: bool = True) -> Generator[dict, None, None]:
         yield {"t": "trace", "line": "路由 → ReAct 对话引擎（工具循环）"}
         tools_desc = "\n".join(
             f"- {t.name}: {t.desc} 参数: {list(t.params.keys())}"
             for t in self.chat_tools.values())
         system = REACT_SYSTEM.format(tools=tools_desc)
+        system += f"\n当前工作目录（所有读写/运行的沙箱根）：{self.settings.resolved_workspace()}"
         messages: List[dict] = [{"role": "system", "content": system}]
         for h in history[-6:]:
             messages.append({"role": h.get("role", "user"), "content": str(h.get("content", ""))[:500]})
@@ -128,6 +130,12 @@ class AgentRuntime:
                 messages.append({"role": "user",
                                  "content": f"OBSERVATION: 未知工具 {action}。可用：{list(self.chat_tools)}"})
                 yield {"t": "trace", "line": f"未知工具 {action}，已提示重试"}
+                continue
+            if tool.perm == "sandbox-write" and not allow_write:
+                obs = "⛔ 写盘/执行类操作被人工门控拒绝（勾选「自动确认写盘门控」后放行）"
+                messages.append({"role": "assistant", "content": raw[:800]})
+                messages.append({"role": "user", "content": f"OBSERVATION: {obs}"})
+                yield {"t": "trace", "line": f"门控拒绝 {action}"}
                 continue
             ok, output = dispatch(tool, self.ctx, obj.get("action_input") or {})
             messages.append({"role": "assistant", "content": raw[:800]})

@@ -305,6 +305,29 @@ def cmd_tool(args) -> int:
     return 0
 
 
+def cmd_workon(args) -> int:
+    """项目模式：把文件工具的沙箱根切到用户的项目文件夹。"""
+    s = load_settings()
+    if args.reset or not args.path:
+        s.project_root = ""
+        save_settings(s)
+        _print(f"  已退出项目模式，沙箱根回默认：{s.resolved_workspace()}")
+        return 0
+    from pathlib import Path
+
+    target = Path(args.path)
+    if not target.is_dir():
+        _print(f"  目录不存在：{target}")
+        return 1
+    s.project_root = str(target.resolve())
+    save_settings(s)
+    n = sum(1 for p in target.rglob("*") if p.is_file())
+    _print(f"  ✓ 项目模式：Agent 沙箱根 = {s.project_root}（{n} 个文件）")
+    _print("  现在可直接对话：浏览/修改/运行该项目的代码（所有读写运行都限制在该目录内）")
+    _print("  退出项目模式：gna workon --reset")
+    return 0
+
+
 def cmd_llm(args) -> int:
     s = load_settings()
     if args.action == "info":
@@ -454,6 +477,11 @@ def build_parser() -> argparse.ArgumentParser:
     w2.add_argument("--port", type=int, default=8501)
     w2.add_argument("--no-browser", action="store_true")
     w2.set_defaults(fn=cmd_web_st)
+
+    wk = sub.add_parser("workon", help="项目模式：切到某个文件夹改它的代码")
+    wk.add_argument("path", nargs="?")
+    wk.add_argument("--reset", action="store_true")
+    wk.set_defaults(fn=cmd_workon)
     return p
 
 

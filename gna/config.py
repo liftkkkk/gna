@@ -126,9 +126,10 @@ class Settings:
     temperature: float = 0.3
     max_react_steps: int = 8
     memory_hops: int = 2
-    auto_confirm_gates: bool = True   # CLI 非交互场景自动确认；chat REPL 默认改为人工确认
+    auto_confirm_gates: bool = True   # False = 人工门控挂起等待确认（8.4 Human-in-the-loop）
     storage_path: str = ""
     workspace: str = ""
+    project_root: str = ""            # 项目模式：Agent 的读写/运行沙箱根 = 该文件夹（空 = 默认工作区）
 
     # ---- 解析 ----
     def resolved_api_key(self) -> str:
@@ -146,6 +147,9 @@ class Settings:
         return Path(self.storage_path) if self.storage_path else default_storage()
 
     def resolved_workspace(self) -> Path:
+        """文件工具的沙箱根：项目模式优先（用户自己的项目文件夹），否则默认工作区。"""
+        if self.project_root and Path(self.project_root).is_dir():
+            return Path(self.project_root)
         ws = Path(self.workspace) if self.workspace else default_workspace()
         (ws / "notes").mkdir(parents=True, exist_ok=True)
         (ws / "reports").mkdir(parents=True, exist_ok=True)
@@ -181,6 +185,7 @@ def load_settings() -> Settings:
         "GNA_LLM_PROVIDER": "provider", "GNA_LLM_BASE_URL": "base_url",
         "GNA_LLM_API_KEY": "api_key", "GNA_LLM_MODEL": "model",
         "GNA_LLM_TEMPERATURE": "temperature", "GNA_MAX_REACT_STEPS": "max_react_steps",
+        "GNA_PROJECT_ROOT": "project_root",
     }
     for env, attr in env_map.items():
         if os.environ.get(env):

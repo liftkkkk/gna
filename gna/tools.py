@@ -51,14 +51,59 @@ class Tool:
 
 # ------------------------------------------------------------ 基础工具 ----
 
-def _t_list_dir(ctx: ToolContext, path: str = ".") -> ToolResult:
+def _t_list_dir(ctx: ToolContext, path: str = ".", recursive: bool = False) -> ToolResult:
     root = ctx.resolve(path)
     if not root.exists():
         return False, f"目录不存在：{path}"
-    items = sorted(root.iterdir(), key=lambda p: (p.is_file(), p.name))
-    lines = [f"{'[目录]' if it.is_dir() else '[文件]'} {it.relative_to(ctx.workspace.resolve())}"
-             for it in items[:50]]
+    if not recursive:
+        items = sorted(root.iterdir(), key=lambda p: (p.is_file(), p.name))
+        lines = [f"{'[目录]' if it.is_dir() else '[文件]'} {_rel(ctx, it)}" for it in items[:60]]
+        return True, "\n".join(lines) or "（空目录）"
+    lines, count = [], 0
+    for p in sorted(root.rglob("*")):
+        if p.is_dir() or any(part.startswith(".") or part == "__pycache__" for part in p.parts):
+            continue
+        lines.append(f"{_rel(ctx, p)}  ({p.stat().st_size}B)")
+        count += 1
+        if count >= 100:
+            lines.append("…（超过 100 个文件，已截断；可用 find_in_files 精确搜索）")
+            break
     return True, "\n".join(lines) or "（空目录）"
+
+
+def _t_find_in_files(ctx: ToolContext, pattern: str, glob: str = "*.py",
+                     max_results: int = 30) -> ToolResult:
+    """在沙箱根内全局搜索代码行（项目模式定位脚本用）。"""
+    import re as _re
+
+    root = ctx.workspace.resolve()
+    try:
+        rx = _re.compile(pattern)
+    except _re.error as e:
+        return False, f"正则不合法：{e}"
+    hits, truncated = [], False
+    for p in sorted(root.rglob(glob or "*")):
+        if not p.is_file() or p.stat().st_size > 300_000:
+            continue
+        if any(part.startswith((".", "__")) for part in p.parts):
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        per_file = 0
+        for i, line in enumerate(text.splitlines(), 1):
+            if rx.search(line):
+                hits.append(f"{_rel(ctx, p)}:{i}: {line.strip()[:140]}")
+                per_file += 1
+                if per_file >= 5 or len(hits) >= max_results:
+                    if len(hits) >= max_results:
+                        truncated = True
+                    break
+        if truncated:
+            break
+    body = "\n".join(hits) or "（无匹配）"
+    return True, body + ("…（已截断）" if truncated else "")
 
 
 def _t_read_file(ctx: ToolContext, path: str) -> ToolResult:
@@ -303,7 +348,8 @@ def _t_verify_report(ctx: ToolContext, topic: str) -> ToolResult:
 def build_tools(ctx: ToolContext) -> Dict[str, Tool]:
     T = lambda name, desc, params, fn, perm="normal": Tool(name, desc, params, fn, perm)  # noqa: E731
     tools = [
-        T("list_dir", "列出 workspace 目录内容", {"path": {"type": "string", "required": False, "desc": "相对路径，默认 ."}}, _t_list_dir),
+        T("list_dir", "列出目录内容（recursive=true 递归浏览整个项目）", {"path": {"type": "string", "required": False, "desc": "相对路径，默认 ."}, "recursive": {"type": "boolean", "required": False}}, _t_list_dir),
+        T("find_in_files", "在项目内全局搜索代码行（正则）", {"pattern": {"type": "string", "required": True}, "glob": {"type": "string", "required": False}, "max_results": {"type": "number", "required": False}}, _t_find_in_files),
         T("read_file", "读取 workspace 内文本文件", {"path": {"type": "string", "required": True, "desc": "相对路径"}}, _t_read_file),
         T("write_file", "写入 workspace 内文本文件（沙箱）", {"path": {"type": "string", "required": True}, "content": {"type": "string", "required": True}}, _t_write_file, perm="sandbox-write"),
         T("run_python", "运行 workspace 内的 Python 脚本（子进程，60s 超时）", {"path": {"type": "string", "required": True}, "timeout": {"type": "number", "required": False}}, _t_run_python, perm="sandbox-write"),

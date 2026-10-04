@@ -35,7 +35,10 @@ def get_rt() -> AgentRuntime:
 
 
 def _bootstrap(rt: AgentRuntime) -> None:
-    """装载示例数据（幂等）：示例笔记按文件缺失补写；示例知识仅在空库时写入。"""
+    """装载示例数据（幂等）：示例笔记按文件缺失补写；示例知识仅在空库时写入。
+    项目模式下不动用户的项目文件夹。"""
+    if rt.settings.project_root:
+        return
     ws = rt.settings.resolved_workspace()
     for fname, content in DEMO_NOTES.items():
         p = ws / "notes" / fname
@@ -129,7 +132,7 @@ def on_send(text: str, hist: list, auto_gate: bool):
             return False
 
     try:
-        for ev in rt.chat_turn(text, confirm=confirm):
+        for ev in rt.chat_turn(text, confirm=confirm, allow_write=auto_gate):
             t = ev.get("t")
             if t == "trace":
                 lines.append(f"· {ev['line']}")
@@ -229,7 +232,8 @@ def on_test_profile(name, model, base, key, temp):
 # ---------------------------------------------------------------- 组装 ----
 
 def build_demo() -> gr.Blocks:
-    get_rt()
+    rt = get_rt()
+    s = rt.settings
     with gr.Blocks(title="GNA · 图原生智能体", theme=gr.themes.Soft()) as demo:
         gr.Markdown("# 🕸 GNA · 图原生智能体运行时　`一切皆图 · 查找皆遍历 · 变更留痕`")
         with gr.Tabs() as tabs:
@@ -275,12 +279,35 @@ def build_demo() -> gr.Blocks:
                         test_b = gr.Button("测试连通")
                         del_b = gr.Button("删除")
 
-                FORM = [name_tb, model_tb, base, key, temp]
-                use_b.click(on_use_model, [prof_dd], [status])
-                prof_dd.change(on_model_selected, [prof_dd], FORM + [status])
-                save_b.click(on_save_profile, FORM, [prof_dd] + FORM + [status])
-                test_b.click(on_test_profile, FORM, [status])
-                del_b.click(on_delete_profile, FORM, [prof_dd] + FORM + [status])
+                with gr.Accordion("项目目录（让 Agent 直接改这个文件夹里的代码）", open=False):
+                    proj_tb = gr.Textbox(value=s.project_root,
+                                         label="项目根目录（绝对路径；留空 = 默认沙箱 ~/.gna/workspace）")
+                    proj_btn = gr.Button("应用项目目录")
+                proj_status = gr.Markdown("")
+
+                def on_apply_project(path):
+                    from pathlib import Path as _P
+
+                    path = (path or "").strip()
+                    if path and not _P(path).is_dir():
+                        return f"❌ 目录不存在：{path}"
+                    st2 = load_settings()
+                    st2.project_root = path
+                    save_settings(st2)
+                    _runtime_reload()
+                    ws = st2.resolved_workspace()
+                    return f"✅ 已切换 Agent 工作沙箱根 → {ws}" + ("（项目模式）" if path else "（默认沙箱）")
+
+                proj_btn.click(on_apply_project, [proj_tb], [proj_status])
+
+            proj_btn.click(on_apply_project, [proj_tb], [proj_status])
+
+            FORM = [name_tb, model_tb, base, key, temp]
+            use_b.click(on_use_model, [prof_dd], [status])
+            prof_dd.change(on_model_selected, [prof_dd], FORM + [status])
+            save_b.click(on_save_profile, FORM, [prof_dd] + FORM + [status])
+            test_b.click(on_test_profile, FORM, [status])
+            del_b.click(on_delete_profile, FORM, [prof_dd] + FORM + [status])
 
         out_all = [msg, chat, trace, kg, stats, facts, audit]
         send.click(on_send, [msg, chat, auto_gate], out_all)

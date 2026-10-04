@@ -24,7 +24,9 @@ def get_rt():
 
 
 def _bootstrap(rt) -> None:
-    """与 Gradio 版一致：示例笔记按缺失补写，示例知识仅空库写入。"""
+    """与 Gradio 版一致：示例笔记按缺失补写，示例知识仅空库写入。项目模式下不动用户文件夹。"""
+    if rt.settings.project_root:
+        return
     from gna.demo import DEMO_FACTS, DEMO_NOTES
 
     ws = rt.settings.resolved_workspace()
@@ -73,7 +75,7 @@ def page_chat(auto_gate: bool) -> None:
         answer_ph = st.empty()
         with st.expander("🧭 运行轨迹", expanded=False):
             trace_ph = st.empty()
-        for ev in rt.chat_turn(prompt, confirm=confirm):
+        for ev in rt.chat_turn(prompt, confirm=confirm, allow_write=auto_gate):
             t = ev.get("t")
             if t == "trace":
                 lines.append(f"· {ev['line']}")
@@ -174,11 +176,31 @@ def page_models() -> None:
         st.rerun()
 
 
+def page_project() -> None:
+    from gna.config import load_settings, save_settings
+
+    st.caption("项目模式：Agent 的读/写/运行沙箱根切到你的项目文件夹（可浏览、修改、运行其中的代码）。")
+    path = st.text_input("项目根目录（绝对路径，留空 = 默认沙箱）",
+                         value=load_settings().project_root)
+    if st.button("应用项目目录", type="primary"):
+        import pathlib as _pl
+
+        path = path.strip()
+        if path and not _pl.Path(path).is_dir():
+            st.error(f"目录不存在：{path}")
+        else:
+            s = load_settings()
+            s.project_root = path
+            save_settings(s)
+            st.cache_resource.clear()
+            st.rerun()
+
+
 def main() -> None:
     st.title("🕸 GNA · 图原生智能体运行时")
     st.caption("`一切皆图 · 查找皆遍历 · 变更留痕` ｜ 同一 headless 内核，Gradio / Streamlit 双前端")
-    page = st.sidebar.radio("页面", ["💬 对话", "🌐 图谱世界", "📜 执行审计", "⚙️ 模型设置"],
-                            label_visibility="collapsed")
+    page = st.sidebar.radio("页面", ["💬 对话", "🌐 图谱世界", "📜 执行审计", "⚙️ 模型设置",
+                                      "📁 项目目录"], label_visibility="collapsed")
     auto_gate = st.sidebar.checkbox("自动确认写盘门控", value=True)
     if page == "💬 对话":
         page_chat(auto_gate)
@@ -186,6 +208,8 @@ def main() -> None:
         page_graph()
     elif page == "📜 执行审计":
         page_audit()
+    elif page == "📁 项目目录":
+        page_project()
     else:
         page_models()
 
