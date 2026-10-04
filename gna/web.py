@@ -83,6 +83,33 @@ def recall_view_md(query: str) -> str:
     return _recall_md(_rt(), query)
 
 
+def ext_all_md() -> str:
+    from .ext import MEMORY_DIR, load_mcp, load_user_skills, pending_memory_files
+
+    rt = get_rt().store
+    mcp_count = sum(1 for n in rt.chat_tools if False) if False else 0
+    lines = ["### 🧩 扩展总览（MCP 自定义工具 · 用户技能 · 记忆文件夹）", ""]
+    servers = load_mcp()["mcpServers"]
+    lines.append(f"**MCP 服务器（{len(servers)}）**——注册后对话引擎可直接调用其工具（命名 `mcp__服务器__工具`）")
+    for name, cfg in servers.items():
+        en = "启用" if cfg.get("enabled", True) else "禁用"
+        lines.append(f"- **{name}**（{en}）：`{cfg.get('command')} {' '.join(cfg.get('args') or [])}`")
+    if not servers:
+        lines.append("-（无——添加后即可像原生工具一样调用，例如接你的 gx-memory）")
+    sk = load_user_skills()
+    lines.append("")
+    lines.append(f"**用户技能（{len(sk)}，ZCode SKILL.md 格式，相关任务自动注入对话）**")
+    for s in sk:
+        lines.append(f"- 【{s['name']}】{s['description']}")
+    if not sk:
+        lines.append("-（无——写一个技能就是给它沉淀一套可复用的工作步骤）")
+    n_mem = len(list(MEMORY_DIR.glob('*.md'))) if MEMORY_DIR.exists() else 0
+    pend = len(pending_memory_files())
+    lines.append("")
+    lines.append(f"**记忆文件夹** `{MEMORY_DIR}`：{n_mem} 条记忆文件（启动自动入图），待入库 {pend}")
+    return "\n".join(lines)
+
+
 def refresh_all():
     return mem_md(), skills_view_md(), audit_md(), raw_audit_md()
 
@@ -283,26 +310,127 @@ def build_demo() -> gr.Blocks:
                         test_b = gr.Button("测试连通")
                         del_b = gr.Button("删除")
 
-                with gr.Accordion("项目目录（让 Agent 直接改这个文件夹里的代码）", open=False):
-                    proj_tb = gr.Textbox(value=s.project_root,
-                                         label="项目根目录（绝对路径；留空 = 默认沙箱 ~/.gna/workspace）")
-                    proj_btn = gr.Button("应用项目目录")
-                proj_status = gr.Markdown("")
+                with gr.Tab("🧩 扩展（MCP · 技能 · 记忆）"):
+                    ext_md = gr.Markdown(ext_all_md())
+                    with gr.Accordion("➕ MCP 服务器（标准 mcpServers 格式，对话中直接调用其工具）", open=False):
+                        with gr.Row():
+                            mc_name = gr.Textbox(label="名称", scale=1)
+                            mc_cmd = gr.Textbox(label="命令（python.exe / npx …）", scale=2)
+                        mc_args = gr.Textbox(label="参数（逗号分隔）")
+                        mc_env = gr.Textbox(label='环境变量 JSON（如 {"GX_PATH":"D:/..."})')
+                        with gr.Row():
+                            mc_add = gr.Button("保存并注册", variant="primary")
+                            mc_test = gr.Button("测试连接（列工具）")
+                        mc_del_name = gr.Textbox(label="要删除的名称")
+                        mc_del = gr.Button("删除")
+                    with gr.Accordion("✍️ 自定义技能（ZCode SKILL.md 格式，相关任务自动注入对话）", open=False):
+                        with gr.Row():
+                            sk_name = gr.Textbox(label="技能名", scale=1)
+                            sk_desc = gr.Textbox(label="一句话描述（何时触发）", scale=2)
+                        sk_body = gr.Textbox(label="技能正文（步骤/规范，Agent 触发时会遵循）", lines=6)
+                        with gr.Row():
+                            sk_add = gr.Button("保存技能", variant="primary")
+                        sk_del_name = gr.Textbox(label="要删除的技能名")
+                        sk_del = gr.Button("删除")
+                    with gr.Accordion("🧠 记忆（md 记忆文件，保存即入图，重启不丢）", open=False):
+                        mem_title = gr.Textbox(label="标题")
+                        mem_body = gr.Textbox(label="内容（要长期记住的事实/偏好/决定）", lines=4)
+                        mem_add = gr.Button("存入记忆", variant="primary")
 
-                def on_apply_project(path):
-                    from pathlib import Path as _P
+            with gr.Accordion("项目目录（让 Agent 直接改这个文件夹里的代码）", open=False):
+                proj_tb = gr.Textbox(value=s.project_root,
+                                     label="项目根目录（绝对路径；留空 = 默认沙箱 ~/.gna/workspace）")
+                proj_btn = gr.Button("应用项目目录")
+            proj_status = gr.Markdown("")
 
-                    path = (path or "").strip()
-                    if path and not _P(path).is_dir():
-                        return f"❌ 目录不存在：{path}"
-                    st2 = load_settings()
-                    st2.project_root = path
-                    save_settings(st2)
+            def on_apply_project(path):
+                from pathlib import Path as _P
+
+                path = (path or "").strip()
+                if path and not _P(path).is_dir():
+                    return f"❌ 目录不存在：{path}"
+                st2 = load_settings()
+                st2.project_root = path
+                save_settings(st2)
+                _runtime_reload()
+                ws = st2.resolved_workspace()
+                return f"✅ 已切换 Agent 工作沙箱根 → {ws}" + ("（项目模式）" if path else "（默认沙箱）")
+
+            proj_btn.click(on_apply_project, [proj_tb], [proj_status])
+
+            def _ext_status(msg: str):
+                return ext_all_md() + "\n\n---\n\n" + msg
+
+            def on_mcp_add(name, command, args_s, env_s):
+                from .ext import add_mcp_server
+                from .mcp_client import list_server_tools
+
+                if not (name or "").strip() or not (command or "").strip():
+                    return _ext_status("❌ 名称与命令必填")
+                try:
+                    env = json.loads(env_s) if (env_s or "").strip() else {}
+                except Exception as e:
+                    return _ext_status(f"❌ 环境变量 JSON 不合法：{e}")
+                args_list = [a.strip() for a in (args_s or "").split(",") if a.strip()]
+                try:
+                    add_mcp_server(name.strip(), command.strip(), args_list, env)
+                    ts = list_server_tools({"command": command.strip(), "args": args_list, "env": env})
                     _runtime_reload()
-                    ws = st2.resolved_workspace()
-                    return f"✅ 已切换 Agent 工作沙箱根 → {ws}" + ("（项目模式）" if path else "（默认沙箱）")
+                    return _ext_status(f"✅ 已注册 **{name}**（{len(ts)} 个工具：{', '.join(t.get('name', '?') for t in ts)[:160]}）")
+                except Exception as e:  # noqa: BLE001
+                    return _ext_status(f"⚠️ 已保存但连接失败：{e}（检查命令/环境变量）")
 
-                proj_btn.click(on_apply_project, [proj_tb], [proj_status])
+            def on_mcp_test(name):
+                from .ext import enabled_mcp_servers
+                from .mcp_client import list_server_tools
+
+                cfg = enabled_mcp_servers().get((name or "").strip())
+                if not cfg:
+                    return _ext_status(f"❌ 未找到启用中的服务器：{name}")
+                try:
+                    ts = list_server_tools(cfg)
+                    return _ext_status(f"✅ {name} 在线，{len(ts)} 个工具：{', '.join(t.get('name', '?') for t in ts)[:200]}")
+                except Exception as e:  # noqa: BLE001
+                    return _ext_status(f"❌ {name} 连接失败：{e}")
+
+            def on_mcp_del(name):
+                from .ext import remove_mcp_server
+
+                remove_mcp_server((name or "").strip())
+                _runtime_reload()
+                return _ext_status(f"🗑 已删除 {name}")
+
+            def on_uskill_add(name, desc, body):
+                from .ext import save_user_skill
+
+                if not (name or "").strip() or not (body or "").strip():
+                    return _ext_status("❌ 技能名与正文必填")
+                f = save_user_skill(name, desc or "", body)
+                return _ext_status(f"✅ 技能已保存 → {f}（相关任务自动注入对话）")
+
+            def on_uskill_del(name):
+                from .ext import remove_user_skill
+
+                ok = remove_user_skill((name or "").strip())
+                return _ext_status(("🗑 已删除 " + name) if ok else f"❌ 未找到 {name}")
+
+            def on_mem_add(title, content):
+                from .ext import mark_memory_ingested, save_memory_file
+                from .extract import ingest
+
+                if not (title or "").strip() or not (content or "").strip():
+                    return _ext_status("❌ 标题与内容必填")
+                f = save_memory_file(title, content)
+                mark_memory_ingested(f)
+                stat = ingest(get_rt().store, get_rt().llm, content, source=f"记忆文件 {f.name}")
+                return _ext_status(f"🧠 已存入记忆并立即入图（实体 {stat['entities']}、事实 {stat['facts']}）← {f.name}")
+
+            mc_add.click(on_mcp_add, [mc_name, mc_cmd, mc_args, mc_env], [ext_md])
+            mc_test.click(on_mcp_test, [mc_name], [ext_md])
+            mc_del.click(on_mcp_del, [mc_del_name], [ext_md])
+            sk_add.click(on_uskill_add, [sk_name, sk_desc, sk_body], [ext_md])
+            sk_del.click(on_uskill_del, [sk_del_name], [ext_md])
+            mem_add.click(on_mem_add, [mem_title, mem_body], [ext_md])
 
             proj_btn.click(on_apply_project, [proj_tb], [proj_status])
 

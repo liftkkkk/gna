@@ -236,8 +236,8 @@ def page_project() -> None:
 def main() -> None:
     st.title("🕸 GNA · 图原生智能体运行时")
     st.caption("`一切皆图 · 查找皆遍历 · 变更留痕` ｜ 同一 headless 内核，Gradio / Streamlit 双前端")
-    page = st.sidebar.radio("页面", ["💬 对话", "🌐 图谱世界", "📜 执行审计", "⚙️ 模型设置",
-                                      "📁 项目目录"], label_visibility="collapsed")
+    page = st.sidebar.radio("页面", ["💬 对话", "🌐 图谱世界", "📜 行为审计", "⚙️ 模型设置",
+                                      "🧩 扩展", "📁 项目目录"], label_visibility="collapsed")
     auto_gate = st.sidebar.checkbox("自动确认写盘门控", value=True)
     if page == "💬 对话":
         page_chat(auto_gate)
@@ -245,6 +245,8 @@ def main() -> None:
         page_graph()
     elif page == "📜 执行审计":
         page_audit()
+    elif page == "🧩 扩展":
+        page_ext()
     elif page == "📁 项目目录":
         page_project()
     else:
@@ -253,3 +255,80 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def page_ext() -> None:
+    import json as _json
+
+    from gna.ext import (MEMORY_DIR, add_mcp_server, delete_profile, load_mcp,
+                         load_user_skills, pending_memory_files, remove_mcp_server,
+                         remove_user_skill, save_user_skill)
+
+    st.title("🧩 扩展（MCP · 技能 · 记忆）")
+    st.caption("标准格式：MCP 用 mcpServers JSON（ZCode/Claude 兼容）；技能用 SKILL.md 文件夹；记忆为 md 文件，保存即入图。")
+
+    st.subheader("🔌 MCP 服务器")
+    data = load_mcp()
+    for name, cfg in data["mcpServers"].items():
+        en = "启用" if cfg.get("enabled", True) else "禁用"
+        st.markdown(f"- **{name}**（{en}）：`{cfg.get('command')} {' '.join(cfg.get('args') or [])}`")
+    if st.button("🔄 测试全部连接（列工具）"):
+        from gna.mcp_client import list_server_tools
+
+        for name, cfg in data["mcpServers"].items():
+            if not cfg.get("enabled", True):
+                continue
+            try:
+                ts = list_server_tools(cfg)
+                st.success(f"✅ {name}：{', '.join(t.get('name', '?') for t in ts)}")
+            except Exception as e:  # noqa: BLE001
+                st.error(f"❌ {name}：{e}")
+    with st.form("mcp_add", border=True):
+        st.caption("添加后对话中即可直接调用（工具名 mcp__服务器__工具）")
+        nname = st.text_input("名称")
+        ncmd = st.text_input("命令")
+        nargs = st.text_input("参数（逗号分隔）")
+        nenv = st.text_input('环境变量 JSON', value="")
+        if st.form_submit_button("保存", type="primary"):
+            if nname.strip() and ncmd.strip():
+                add_mcp_server(nname.strip(), ncmd.strip(),
+                               [a.strip() for a in nargs.split(",") if a.strip()],
+                               _json.loads(nenv) if nenv.strip() else {})
+                st.cache_resource.clear()
+                st.rerun()
+    d1, d2 = st.columns([3, 1])
+    del_name = d1.text_input("要删除的 MCP 名称", key="del_mcp")
+    if d2.button("删除", use_container_width=True):
+        remove_mcp_server(del_name.strip())
+        st.cache_resource.clear()
+        st.rerun()
+
+    st.subheader("✍️ 自定义技能（SKILL.md）")
+    for s_ in load_user_skills():
+        st.markdown(f"- 【{s_['name']}】{s_['description']}")
+    with st.form("skill_add", border=True):
+        skn = st.text_input("技能名")
+        skd = st.text_input("一句话描述（何时触发）")
+        skb = st.text_area("技能正文（步骤/规范）", height=140)
+        if st.form_submit_button("保存技能", type="primary"):
+            if skn.strip() and skb.strip():
+                save_user_skill(skn, skd, skb)
+                st.cache_resource.clear()
+                st.rerun()
+
+    st.subheader("🧠 记忆文件夹")
+    n_mem = len(list(MEMORY_DIR.glob("*.md"))) if MEMORY_DIR.exists() else 0
+    pend = len(pending_memory_files())
+    st.markdown(f"`{MEMORY_DIR}`：{n_mem} 条记忆文件（启动自动入图），待入库 {pend}。")
+    with st.form("mem_add", border=True):
+        mt = st.text_input("标题")
+        mc = st.text_area("内容（要长期记住的事实/偏好/决定）", height=100)
+        if st.form_submit_button("存入记忆", type="primary"):
+            from gna.ext import mark_memory_ingested, save_memory_file
+            from gna.extract import ingest
+
+            if mt.strip() and mc.strip():
+                f = save_memory_file(mt, mc)
+                mark_memory_ingested(f)
+                ingest(get_rt().store, get_rt().llm, mc, source=f"记忆文件 {f.name}")
+                st.success(f"🧠 已存入记忆并立即入图 ← {f.name}")

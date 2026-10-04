@@ -56,6 +56,53 @@ class AgentRuntime:
                                extra_roots=[INBOX])
         self.chat_tools = build_tools(self.ctx)
         sync_tool_nodes(self.store, self.chat_tools)
+        self._load_extensions()   # 最后装载：MCP 工具注册 / 记忆文件夹入库（依赖 chat_tools 就绪）
+
+    # ================================================== 用户扩展（MCP/技能/记忆）====
+    def _load_extensions(self) -> None:
+        """启动时装载用户扩展：MCP 自定义工具上图 + 记忆文件夹自动入库。"""
+        from .ext import build_mcp_tools, mark_memory_ingested, pending_memory_files
+        from .extract import ingest
+
+        try:
+            mcp_tools = build_mcp_tools()
+        except Exception:
+            mcp_tools = []
+        if mcp_tools:
+            for t in mcp_tools:
+                self.chat_tools[t.name] = t
+            sync_tool_nodes(self.store, {t.name: t for t in mcp_tools}, source="MCP 用户配置")
+
+        try:
+            for f in pending_memory_files():
+                content = f.read_text(encoding="utf-8", errors="replace")
+                self.store.add_node("turn", f"记忆@{f.stem}", "记忆文件夹",
+                                    data=content[:200], props={"role": "memory"})
+                ingest(self.store, self.llm, content, source=f"记忆文件 {f.name}")
+                mark_memory_ingested(f)
+        except Exception:
+            pass
+
+    def user_skills_block(self, query: str = "") -> str:
+        """用户自定义技能（ZCode SKILL.md 格式）→ 注入 ReAct 提示词。"""
+        from .ext import load_user_skills
+
+        skills = load_user_skills()
+        if not skills:
+            return ""
+        lines = ["", "用户自定义技能库（任务与其相关时，遵循对应技能的步骤执行）："]
+        budget = 3500
+        qlow = (query or "").lower()
+        for s in skills:
+            head = f"- 【{s['name']}】{s['description']}"
+            body = s["body"]
+            relevant = (not qlow) or s["name"].lower() in qlow \
+                or any(w and len(w) >= 2 and w in body for w in re.findall(r"[\u4e00-\u9fffA-Za-z]{2,}", qlow)[:12])
+            if relevant and budget - len(body) > 0:
+                head += "\n" + body[:1200]
+                budget -= len(body)
+            lines.append(head)
+        return "\n".join(lines)
 
     # ================================================== 路径引用（通用接口）====
     @staticmethod
@@ -179,6 +226,7 @@ class AgentRuntime:
             for t in self.chat_tools.values())
         system = REACT_SYSTEM.format(tools=tools_desc)
         system += f"\n当前工作目录（所有读写/运行的沙箱根）：{self.settings.resolved_workspace()}"
+        system += self.user_skills_block(text)
         messages: List[dict] = [{"role": "system", "content": system}]
         for h in history[-6:]:
             messages.append({"role": h.get("role", "user"), "content": str(h.get("content", ""))[:500]})

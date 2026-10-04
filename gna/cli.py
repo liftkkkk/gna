@@ -330,6 +330,99 @@ def cmd_workon(args) -> int:
     return 0
 
 
+def cmd_mcp(args) -> int:
+    from .ext import add_mcp_server, enabled_mcp_servers, load_mcp, remove_mcp_server
+
+    if args.action == "list":
+        data = load_mcp()
+        if not data["mcpServers"]:
+            _print("  （无 MCP 服务器配置；添加：gna mcp add <名> --command <cmd> --args 'a,b' --env '{\"K\":\"V\"}'）")
+            return 0
+        for name, cfg in data["mcpServers"].items():
+            mark = "" if cfg.get("enabled", True) else "  [已禁用]"
+            _print(f"  {name}  ← {cfg.get('command')} {' '.join(cfg.get('args') or [])}{mark}")
+        for name, cfg in enabled_mcp_servers().items():
+            try:
+                from .mcp_client import list_server_tools
+
+                ts = list_server_tools(cfg)
+                _print(f"  · {name} 的工具：{', '.join(t.get('name', '?') for t in ts) or '（无）'}")
+            except Exception as e:  # noqa: BLE001
+                _print(f"  · {name} 连接失败：{e}")
+        return 0
+    if args.action == "add":
+        if not args.name or not args.command:
+            _print("  用法：gna mcp add <名> --command <命令> --args 'arg1,arg2' --env '{\"K\":\"V\"}'")
+            return 1
+        args_list = [a for a in (args.args or "").split(",") if a]
+        env = json.loads(args.env) if args.env else {}
+        add_mcp_server(args.name, args.command, args_list, env, enabled=not args.disabled)
+        _print(f"  已保存 MCP 服务器 {args.name}（重启前端后其工具自动注册）")
+        return 0
+    if args.action == "remove":
+        remove_mcp_server(args.name)
+        _print(f"  已删除 {args.name}")
+        return 0
+    if args.action == "test":
+        cfg = enabled_mcp_servers().get(args.name)
+        if not cfg:
+            _print(f"  未找到启用中的服务器：{args.name}")
+            return 1
+        try:
+            from .mcp_client import list_server_tools
+
+            ts = list_server_tools(cfg)
+            _print(f"  [OK] {args.name} 工具：{', '.join(t.get('name', '?') for t in ts)}")
+        except Exception as e:  # noqa: BLE001
+            _print(f"  [FAIL] {e}")
+            return 1
+    return 0
+
+
+def cmd_uskill(args) -> int:
+    from .ext import load_user_skills, remove_user_skill, save_user_skill
+
+    if args.action == "list":
+        sk = load_user_skills()
+        if not sk:
+            _print(f"  （无用户技能；添加：gna uskill add <名> --desc '一句话' --body-file 步骤.md，或网页「🧩 扩展」页）")
+            _print(f"  格式：{__import__('gna.ext', fromlist=['SKILLS_DIR']).SKILLS_DIR}\\<名>\\SKILL.md（ZCode 标准）")
+            return 0
+        for s in sk:
+            _print(f"  【{s['name']}】{s['description']}  ← {s['path']}")
+    elif args.action == "add":
+        body = pathlib_Path(args.body_file).read_text(encoding="utf-8") if args.body_file else (args.body or "")
+        if not args.name or not body.strip():
+            _print("  用法：gna uskill add <名> --desc '一句话' --body-file 步骤.md")
+            return 1
+        f = save_user_skill(args.name, args.desc or "", body)
+        _print(f"  已保存技能 → {f}")
+    elif args.action == "remove":
+        _print("  已删除" if remove_user_skill(args.name) else "  未找到")
+    return 0
+
+
+def cmd_memory_import(args) -> int:
+    """把一个 md 文件作为长期记忆入图（ZCode 式记忆文件夹约定）。"""
+    from pathlib import Path as _P
+
+    from .ext import MEMORY_DIR, mark_memory_ingested, save_memory_file
+
+    src = _P(args.file)
+    if not src.is_file():
+        _print(f"  文件不存在：{src}")
+        return 1
+    f = save_memory_file(src.stem, src.read_text(encoding="utf-8", errors="replace"))
+    GNA_HOME.mkdir(parents=True, exist_ok=True)
+    mark_memory_ingested(f)
+    rt = _make_runtime(storage=args.storage)
+    from .extract import ingest
+
+    stat = ingest(rt.store, rt.llm, f.read_text(encoding="utf-8"), source=f"记忆文件 {f.name}")
+    _print(f"  已入图：实体 {stat['entities']}、事实 {stat['facts']} ← {f}")
+    return 0
+
+
 def cmd_llm(args) -> int:
     s = load_settings()
     if args.action == "info":
@@ -479,6 +572,28 @@ def build_parser() -> argparse.ArgumentParser:
     w2.add_argument("--port", type=int, default=8501)
     w2.add_argument("--no-browser", action="store_true")
     w2.set_defaults(fn=cmd_web_st)
+
+    m = sub.add_parser("mcp", help="MCP 自定义工具（标准 mcpServers 格式）")
+    m.add_argument("action", choices=["list", "add", "remove", "test"])
+    m.add_argument("name", nargs="?")
+    m.add_argument("--command")
+    m.add_argument("--args", dest="args", default="")
+    m.add_argument("--env", dest="env")
+    m.add_argument("--disabled", action="store_true")
+    m.set_defaults(fn=cmd_mcp)
+
+    us = sub.add_parser("uskill", help="用户自定义技能（ZCode SKILL.md 格式）")
+    us.add_argument("action", choices=["list", "add", "remove"])
+    us.add_argument("name", nargs="?")
+    us.add_argument("--desc")
+    us.add_argument("--body")
+    us.add_argument("--body-file")
+    us.set_defaults(fn=cmd_uskill)
+
+    mi = sub.add_parser("memory-import", help="把一个 md 文件作为长期记忆入图")
+    mi.add_argument("file")
+    mi.add_argument("--storage")
+    mi.set_defaults(fn=cmd_memory_import)
 
     wk = sub.add_parser("workon", help="项目模式：切到某个文件夹改它的代码")
     wk.add_argument("path", nargs="?")
