@@ -473,9 +473,18 @@ def cmd_llm(args) -> int:
 
 
 def cmd_web(args) -> int:
+    """默认网页前端：自研 HTML（FastAPI + NDJSON 流式）。"""
+    from .server import launch
+
+    _print(f"GNA 前端启动：http://{args.host}:{args.port} （Ctrl+C 停止）")
+    launch(host=args.host, port=args.port)
+    return 0
+
+
+def cmd_web_gradio(args) -> int:
     from .web import launch
 
-    _print(f"GNA Web 启动：http://{args.host}:{args.port} （Ctrl+C 停止）")
+    _print(f"GNA Gradio 前端启动：http://{args.host}:{args.port} （Ctrl+C 停止）")
     launch(host=args.host, port=args.port, inbrowser=not args.no_browser)
     return 0
 
@@ -561,11 +570,16 @@ def build_parser() -> argparse.ArgumentParser:
     l.add_argument("--api-key", dest="api_key")
     l.set_defaults(fn=cmd_llm)
 
-    w = sub.add_parser("web", help="Gradio 网页界面")
+    w = sub.add_parser("web", help="网页前端（自研 HTML，流式）")
     w.add_argument("--host", default="127.0.0.1")
-    w.add_argument("--port", type=int, default=7860)
-    w.add_argument("--no-browser", action="store_true")
+    w.add_argument("--port", type=int, default=8000)
     w.set_defaults(fn=cmd_web)
+
+    wg = sub.add_parser("web-gradio", help="Gradio 前端（旧版界面）")
+    wg.add_argument("--host", default="127.0.0.1")
+    wg.add_argument("--port", type=int, default=7860)
+    wg.add_argument("--no-browser", action="store_true")
+    wg.set_defaults(fn=cmd_web_gradio)
 
     w2 = sub.add_parser("web-st", help="Streamlit 网页界面（同一内核的另一视图）")
     w2.add_argument("--host", default="127.0.0.1")
