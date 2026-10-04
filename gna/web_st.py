@@ -57,7 +57,7 @@ def page_chat(auto_gate: bool) -> None:
             st.markdown(m["content"])
 
     prompt = st.chat_input(
-        "试试：上传论文让我读 ｜ 记住：张三是李四的同事 ｜ 写个程序输出斐波那契前10项并运行 ｜ 写一份简报并验证")
+        "试试：粘贴本地文件/文件夹路径让我处理 ｜ 记住：张三是李四的同事 ｜ 写个程序输出斐波那契前10项并运行")
     if prompt is None:
         return
 

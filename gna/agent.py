@@ -47,6 +47,7 @@ class AgentRuntime:
                                            autosave=True)
         self.llm = llm or make_llm(self.settings)
         self.executor = TaskExecutor(self.store, self.llm, self.settings, BUILTIN_SKILLS)
+        self.session_mounts: List[str] = []   # 会话挂载的本地路径（消息中引用即自动挂载）
         self.executor.ensure_registry()
         from .uploads import INBOX
 
@@ -56,17 +57,84 @@ class AgentRuntime:
         self.chat_tools = build_tools(self.ctx)
         sync_tool_nodes(self.store, self.chat_tools)
 
+    # ================================================== 路径引用（通用接口）====
+    @staticmethod
+    def detect_paths(text: str) -> List[str]:
+        """从消息文本提取本地路径（支持引号包裹的带空格路径；只返回真实存在的）。"""
+        from pathlib import Path as _P
+
+        found: List[str] = []
+        quoted = re.findall(r'["\']([A-Za-z]:[/\\][^"\']+)["\']', text or "")
+        bare = re.findall(r'[A-Za-z]:[/\\][^\s"\'，。；！？：*?<>|]+', text or "")
+        for cand in quoted + bare:
+            cand = cand.strip().rstrip("/\\.,;")
+            if not cand:
+                continue
+            p = _P(cand).expanduser()
+            if p.exists() and p.as_posix() not in {x["path"] for x in found}:
+                found.append({"path": str(p.resolve()), "type": "dir" if p.is_dir() else "file"})
+        return [x["path"] for x in found]
+
+    def attach(self, paths: List[str]) -> List[dict]:
+        """把本地文件/文件夹挂载进会话沙箱（读/写/运行通用）。返回挂载信息。"""
+        from pathlib import Path as _P
+
+        infos: List[dict] = []
+        for s in paths:
+            p = _P(s).expanduser()
+            if not p.exists():
+                continue
+            rp = str(p.resolve())
+            if p.is_dir():
+                files = [q for q in p.rglob("*") if q.is_file()
+                         and not any(part.startswith((".", "__")) for part in q.parts[len(p.parts):])]
+                infos.append({"path": rp, "type": "dir", "n_files": len(files),
+                              "samples": [q.name for q in files[:8]]})
+            else:
+                infos.append({"path": rp, "type": "file", "size": p.stat().st_size})
+            if rp not in self.session_mounts:
+                self.session_mounts.append(rp)
+        if self.session_mounts:
+            merged = list(dict.fromkeys([*self.ctx.extra_roots, *self.session_mounts]))
+            self.ctx.extra_roots = merged
+            ex = self.executor.ctx.extra_roots
+            self.executor.ctx.extra_roots = list(dict.fromkeys([*ex, *self.session_mounts]))
+        return infos
+
+    @staticmethod
+    def _mount_note(infos: List[dict]) -> str:
+        lines = ["【用户引用的本地路径（已挂载进沙箱，可直接读写/运行；文件夹用 list_dir recursive=true 浏览）】"]
+        for i in infos:
+            if i["type"] == "dir":
+                lines.append(f"- [文件夹] {i['path']}（{i['n_files']} 个文件，如 {', '.join(i['samples'][:6])}）")
+            else:
+                low = i["path"].lower()
+                hint = ("PDF → 用 read_pdf 读取" if low.endswith(".pdf")
+                        else "压缩包 → 用 unzip 解压" if low.endswith((".zip", ".tar", ".gz", ".tgz"))
+                        else "文本 → 用 read_file 读取")
+                lines.append(f"- [文件] {i['path']}（{i['size'] / 1024:.0f} KB；{hint}）")
+        return "\n".join(lines)
+
     # ================================================================ 对话 ====
     def chat_turn(self, text: str, confirm: Optional[ConfirmCallback] = None,
                   history: Optional[List[dict]] = None, allow_write: bool = True) -> Generator[dict, None, None]:
         text = (text or "").strip()
         if not text:
             return
+        # 路径引用（通用接口）：消息中出现本地文件/文件夹路径 → 自动挂载进会话沙箱
+        detected = self.detect_paths(text)
+        if detected:
+            infos = self.attach(detected)
+            if infos:
+                text = text + "\n\n" + self._mount_note(infos)
         store = self.store
         store._turn_seq += 1
         turn_id = store.add_node("turn", f"回合{store._turn_seq}", "用户",
                                  data=text[:500], props={"role": "user", "ts": now()})
         store.push_owner(turn_id)
+        if detected:
+            yield {"t": "trace",
+                   "line": f"已挂载 {len(detected)} 个本地路径（自动区分文件/文件夹，读写运行均限该范围）"}
 
         # (1)(2) 感知入图 + 遍历召回
         ctx = recall_context(store, text, hops=self.settings.memory_hops)
@@ -75,7 +143,9 @@ class AgentRuntime:
         # (3) 路由
         forced_task = text.startswith("/任务")
         body = text[3:].strip() if forced_task else text
-        if forced_task or TASK_PATTERN.search(text):
+        if forced_task or (TASK_PATTERN.search(text)
+                           and not (detected and not re.search(r"报告|简报|起草", text))):
+            # 贴了本地路径且没有产出物要求（如"写报告"）→ 属于浏览/修改类，走 ReAct 工具循环
             yield from self._task_engine(body, confirm, turn_id)
         else:
             yield from self._react_engine(text, ctx, history or [], turn_id, allow_write=allow_write)

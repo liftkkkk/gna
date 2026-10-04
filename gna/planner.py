@@ -60,8 +60,8 @@ class GraphPlanner:
                     val = hint.get(ph)
                     if val is not None:
                         hinted = True  # 参数已知 → 只认具体化命中
-                        concrete = PLACEHOLDER.sub(val, p)
-                        # 规划期抽象状态里的通配断言（read:*）可覆盖具体前置
+                        # lambda 替换：参数值（可能含 \U 等 Windows 路径）不做模板转义解析
+                        concrete = PLACEHOLDER.sub(lambda _m: val, p)
                         if not any(str(a) == concrete or (str(a).endswith("*") and concrete.startswith(str(a)[:-1]))
                                    for a in state):
                             return False
