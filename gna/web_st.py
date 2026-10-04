@@ -125,18 +125,29 @@ def page_chat(auto_gate: bool) -> None:
 
 
 def page_graph() -> None:
-    from gna.web import facts_md, kg_preview_md, stats_md
+    from gna.views import hero_md, knowledge_md, recall_md, skills_md
 
-    st.markdown(stats_md())
-    st.markdown(facts_md())
-    st.markdown(kg_preview_md())
+    rt = get_rt().store
+    st.markdown(hero_md(rt))
+    st.markdown(knowledge_md(rt))
+    st.markdown(skills_md(rt))
+    with st.expander("🔍 记忆检索（激活扩散——沿关系边召回，不是关键词匹配）", expanded=False):
+        q = st.text_input("输入主题（人名 / 文件名 / 你让它记过的任何概念）")
+        if st.button("检索") and q.strip():
+            st.markdown(recall_md(rt, q))
+    st.caption("🎨 想看整张图？另开终端运行 `gna graph viz`，浏览器打开生成的 HTML（可拖拽缩放）。")
 
 
 def page_audit() -> None:
-    from gna.web import events_md
+    from gna.views import raw_events_md, timeline_md
 
-    st.markdown(events_md())
-    st.caption("一切变更皆事件：回放 = 沿 next 边遍历；CLI `gna memory rollback` 可补偿回滚。")
+    rt = get_rt().store
+    mode = st.radio("视图", ["重要事件（人话时间线）", "原始 ΔW 事件（调试）"], horizontal=True)
+    if mode.startswith("重要"):
+        st.markdown(timeline_md(rt, limit=40))
+        st.caption("一切变更皆图上的事件：可回放（`gna graph events`）、可回滚（`gna memory rollback`）。")
+    else:
+        st.markdown(raw_events_md(rt, limit=60))
 
 
 def page_models() -> None:

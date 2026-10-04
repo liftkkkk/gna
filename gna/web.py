@@ -51,66 +51,40 @@ def _bootstrap(rt: AgentRuntime) -> None:
 
 # ---------------------------------------------------------------- 渲染 ----
 
-_COLOR = {"entity": "#4C9AFF", "fact": "#36B37E", "turn": "#F6A609", "task": "#6554C0",
-          "step": "#8777D9", "result": "#00B8D9", "skill": "#FF5630", "tool": "#FF8B00",
-          "constraint": "#BF2600", "goal": "#5243AA", "episode": "#B3B5B3"}
+from .views import (knowledge_md as _knowledge_md, raw_events_md as _raw_events_md,
+                    recall_md as _recall_md, skills_md as _skills_md,
+                    timeline_md as _timeline_md)
 
 
-def stats_md() -> str:
-    st = get_rt().stats()
-    types = "、".join(f"{k} {v}" for k, v in sorted(st["by_type"].items(), key=lambda x: -x[1]))
-    return (f"**后端** {st['backend']}　**节点** {st['nodes']}　**边** {st['edges']}　"
-            f"**断言** {st['assertions']}　**事件** {st['events']}　**失效** {st['invalid']}\n\n"
-            f"节点分布：{types}")
+def _rt():
+    return get_rt().store
 
 
-def facts_md() -> str:
-    acts = sorted(get_rt().store.assertions())
-    body = "\n".join(f"- `{a}`" for a in acts[:60]) or "（空）"
-    return f"### 当前世界状态（{len(acts)} 条有效断言）\n{body}"
+def mem_md() -> str:
+    """图谱世界主视图：它知道什么（hero + 知识卡片 + 已完成事项）。"""
+    from .views import hero_md
+
+    return hero_md(_rt()) + "\n\n" + _knowledge_md(_rt())
 
 
-def kg_preview_md() -> str:
-    """图结构轻量预览（纯文本，零重组件）。交互式网页版：CLI `gna graph viz`。"""
-    rt = get_rt()
-    lines: list[str] = []
-    for nid, nd in rt.store.be.nodes():
-        t = nd.get("class_") or "?"
-        if t not in ("entity", "skill", "constraint", "tool"):
-            continue
-        name = str(nd.get("name") or nid)
-        inv = " ⚠️已失效" if (nd.get("attributes") or {}).get("invalid") else ""
-        icon = {"entity": "🔷", "skill": "🔥", "tool": "🛠", "constraint": "⛔"}.get(t, "•")
-        lines.append(f"{icon} **{name}**{inv}")
-        cnt = 0
-        for m, ed in rt.store.be.out_edges(nid):
-            mt = (rt.store.be.get_node(m) or {})
-            if mt.get("class_") in ("episode",):
-                continue
-            lines.append(f"　　-{ed.get('label')}→ {mt.get('name', m)}")
-            cnt += 1
-            if cnt >= 6:
-                lines.append("　　…")
-                break
-        if len(lines) > 80:
-            break
-    body = "\n".join(lines) or "（空）"
-    return (f"### 图结构预览（节点 {rt.store.be.node_count()}，仅列 对象/技能/工具/约束 及其出边）\n\n"
-            + body.replace("\n", "  \n")
-            + "\n\n> 🎨 交互式网页版图谱：另开终端运行 `gna graph viz`，用浏览器打开生成的 gna_graph.html。")
+def skills_view_md() -> str:
+    return _skills_md(_rt())
 
 
-def events_md(limit: int = 40) -> str:
-    eps = list(get_rt().store.walk_episode_chain())[-limit:]
-    lines = [f"**#{e['attributes'].get('seq')}** `{e['attributes'].get('op')}` "
-             f"〈{e['attributes'].get('source')}〉 {str(e['attributes'].get('payload'))[:70]}"
-             for e in reversed(eps)]
-    body = "\n".join(lines) or "（暂无事件）"
-    return f"### ΔW 事件链（最近 {len(eps)} 条，新→旧）\n\n{body}"
+def audit_md() -> str:
+    return _timeline_md(_rt(), limit=40)
+
+
+def raw_audit_md() -> str:
+    return _raw_events_md(_rt(), limit=60)
+
+
+def recall_view_md(query: str) -> str:
+    return _recall_md(_rt(), query)
 
 
 def refresh_all():
-    return kg_preview_md(), stats_md(), facts_md(), events_md()
+    return mem_md(), skills_view_md(), audit_md(), raw_audit_md()
 
 
 # ---------------------------------------------------------------- 对话 ----
@@ -275,13 +249,19 @@ def build_demo() -> gr.Blocks:
                         auto_gate = gr.Checkbox(value=True, label="自动确认写盘门控")
                     with gr.Column(scale=2):
                         trace = gr.Markdown("### 🧭 运行轨迹\n（发送消息后显示：召回 → 路由 → 工具/计划 → ΔW 写回）")
-            with gr.Tab("🌐 图谱世界"):
-                kg = gr.Markdown(kg_preview_md())
-                stats = gr.Markdown(stats_md())
-                facts = gr.Markdown(facts_md())
-            with gr.Tab("📜 执行审计（ΔW 事件链）"):
-                audit = gr.Markdown(events_md())
-                gr.Markdown("> 一切变更皆事件：回放 = 沿 next 边遍历；CLI `gna memory rollback` 可补偿回滚。")
+            with gr.Tab("🧠 图谱世界"):
+                mem = gr.Markdown(mem_md())
+                sk = gr.Markdown(skills_view_md())
+                with gr.Accordion("🔍 记忆检索（激活扩散——沿关系边召回，不是关键词匹配）", open=False):
+                    recall_q = gr.Textbox(label="输入主题（人名 / 文件名 / 你让它记过的任何概念）")
+                    recall_btn = gr.Button("检索")
+                recall_out = gr.Markdown("")
+                gr.Markdown("> 🎨 想看整张图？另开终端运行 `gna graph viz`，浏览器打开生成的 HTML（可拖拽缩放）。")
+            with gr.Tab("🕘 行为审计"):
+                audit = gr.Markdown(audit_md())
+                with gr.Accordion("原始 ΔW 事件（调试视图）", open=False):
+                    raw = gr.Markdown(raw_audit_md())
+                gr.Markdown("> 一切变更皆图上的事件：可回放（`gna graph events`）、可回滚（`gna memory rollback`）。")
             with gr.Tab("⚙️ 模型设置"):
                 gr.Markdown("方案保存在 `~/.gna/models.json`，开机自动加载。")
                 with gr.Row():
@@ -333,11 +313,12 @@ def build_demo() -> gr.Blocks:
             test_b.click(on_test_profile, FORM, [status])
             del_b.click(on_delete_profile, FORM, [prof_dd] + FORM + [status])
 
-        out_all = [msg, upl, chat, trace, kg, stats, facts, audit]
+        out_all = [msg, upl, chat, trace, mem, sk, audit, raw]
         send.click(on_send, [msg, upl, chat, auto_gate], out_all)
         msg.submit(on_send, [msg, upl, chat, auto_gate], out_all)
         clr.click(lambda: [], None, [chat])
-        tabs.select(lambda: refresh_all(), None, [kg, stats, facts, audit])
+        tabs.select(lambda: refresh_all(), None, [mem, sk, audit, raw])
+        recall_btn.click(recall_view_md, [recall_q], [recall_out])
     return demo
 
 
