@@ -115,11 +115,33 @@ def refresh_all():
 
 # ---------------------------------------------------------------- 对话 ----
 
-def on_send(text: str, hist: list, auto_gate: bool):
+def _ingest_uploads(files) -> list:
+    """上传件落 inbox；压缩包自动解压。返回文件说明列表。"""
+    from gna.uploads import extract_archive, is_archive, save_upload
+
+    notes = []
+    for f in files or []:
+        src = Path(f)
+        dest = save_upload(src.name, src.read_bytes())
+        if is_archive(dest.name):
+            extracted, skipped = extract_archive(dest)
+            notes.append(f"{dest.name}（压缩包，已自动解压 {len(extracted)} 个文件 → inbox/{dest.stem}_extracted/）")
+        else:
+            notes.append(dest.name)
+    return notes
+
+
+def on_send(text: str, files: list, hist: list, auto_gate: bool):
     rt = get_rt()
+    notes = _ingest_uploads(files)
     text = (text or "").strip()
+    if notes:
+        text = ((text or "请处理我上传的这些文件") +
+                "\n\n【用户上传的文件（已存入 inbox/，可用 read_pdf 读论文、unzip 解压、read_file 读文本）】\n- "
+                + "\n- ".join(notes))
+    text = text.strip()
     if not text:
-        return "", hist or [], gr.update(), *refresh_all()
+        return "", gr.update(), hist or [], gr.update(), *refresh_all()
     hist = list(hist or []) + [{"role": "user", "content": text}]
     lines: list[str] = []
     answer = None
@@ -155,7 +177,7 @@ def on_send(text: str, hist: list, auto_gate: bool):
     if answer:
         hist.append({"role": "assistant", "content": answer})
     trace = "### 🧭 运行轨迹\n" + ("\n".join(lines) or "（无）")
-    return "", hist, trace, *refresh_all()
+    return "", gr.update(value=None), hist, trace, *refresh_all()
 
 
 # ---------------------------------------------------------------- 设置 ----
@@ -242,6 +264,8 @@ def build_demo() -> gr.Blocks:
                     with gr.Column(scale=3):
                         chat = gr.Chatbot(type="messages", height=470, label="GNA",
                                           show_copy_button=True)
+                        upl = gr.File(label="📎 上传文件 / 压缩包（可拖拽、可多选；文件夹请打包成 zip 上传）",
+                                      file_count="multiple")
                         msg = gr.Textbox(show_label=False, placeholder=(
                             "试试：记住：张三是李四的同事 ｜ 你在图谱里记得什么 ｜ "
                             "帮我算一下 (365*3+17)/4 ｜ 写一份关于图神经网络的简报并验证 ｜ /任务 强制走图规划"))
@@ -309,9 +333,9 @@ def build_demo() -> gr.Blocks:
             test_b.click(on_test_profile, FORM, [status])
             del_b.click(on_delete_profile, FORM, [prof_dd] + FORM + [status])
 
-        out_all = [msg, chat, trace, kg, stats, facts, audit]
-        send.click(on_send, [msg, chat, auto_gate], out_all)
-        msg.submit(on_send, [msg, chat, auto_gate], out_all)
+        out_all = [msg, upl, chat, trace, kg, stats, facts, audit]
+        send.click(on_send, [msg, upl, chat, auto_gate], out_all)
+        msg.submit(on_send, [msg, upl, chat, auto_gate], out_all)
         clr.click(lambda: [], None, [chat])
         tabs.select(lambda: refresh_all(), None, [kg, stats, facts, audit])
     return demo

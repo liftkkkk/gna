@@ -46,14 +46,40 @@ def page_chat(auto_gate: bool) -> None:
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
+    ups = st.file_uploader("📎 上传文件 / 压缩包（可多选、可拖拽；文件夹请打包成 zip 上传）",
+                           accept_multiple_files=True)
+    if "sent_keys" not in st.session_state:
+        st.session_state.sent_keys = set()
+
     trace_ph = st.empty()
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
     prompt = st.chat_input(
-        "试试：记住：张三是李四的同事 ｜ 帮我算一下 (365*3+17)/4 ｜ 写个程序输出斐波那契前10项并运行 ｜ 写一份关于图神经网络的简报并验证")
-    if not prompt:
+        "试试：上传论文让我读 ｜ 记住：张三是李四的同事 ｜ 写个程序输出斐波那契前10项并运行 ｜ 写一份简报并验证")
+    if prompt is None:
+        return
+
+    from gna.uploads import extract_archive, is_archive, save_upload
+
+    notes: list[str] = []
+    for up in (ups or []):
+        k = (up.name, up.size)
+        if k in st.session_state.sent_keys:
+            continue
+        st.session_state.sent_keys.add(k)
+        dest = save_upload(up.name, up.getvalue())
+        if is_archive(dest.name):
+            extracted, _ = extract_archive(dest)
+            notes.append(f"{dest.name}（压缩包，已自动解压 {len(extracted)} 个文件 → inbox/{dest.stem}_extracted/）")
+        else:
+            notes.append(dest.name)
+    if notes:
+        prompt = ((prompt.strip() or "请处理我上传的这些文件") +
+                  "\n\n【用户上传的文件（已存入 inbox/，可用 read_pdf 读论文、unzip 解压、read_file 读文本）】\n- "
+                  + "\n- ".join(notes))
+    if not prompt.strip():
         return
 
     st.session_state.messages.append({"role": "user", "content": prompt})

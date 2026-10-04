@@ -33,6 +33,7 @@ REACT_SYSTEM = """[角色:REACT] 你是图原生智能体 GNA：状态、记忆�
   1) 收到多步任务先在 thought 里给出简短步骤计划（建什么文件、怎么验证），再逐步执行；
   2) 写代码任务：用 write_file 把程序写到 workspace 内（如 scripts/xxx.py），用 run_python 运行；若 stderr 有报错，修复代码重写重跑，直至成功；或用 run_code 一步写入并运行；
   3) 一次只调一个工具；观察结果会以 OBSERVATION: 前缀回给你；引用事实时注明来源。
+  4) 用户上传的文件都在 inbox/ 目录：论文用 read_pdf 读（自动存 .txt 全文），压缩包用 unzip 解压，文本用 read_file 读。
 输出协议：只输出一个 JSON 对象——
   需要工具：{{"thought": "简短理由", "action": "工具名", "action_input": {{...}}}}
   直接回答：{{"thought": "简短理由", "final": "给用户的完整回答"}}"""
@@ -47,8 +48,11 @@ class AgentRuntime:
         self.llm = llm or make_llm(self.settings)
         self.executor = TaskExecutor(self.store, self.llm, self.settings, BUILTIN_SKILLS)
         self.executor.ensure_registry()
+        from .uploads import INBOX
+
         self.ctx = ToolContext(store=self.store, llm=self.llm,
-                               workspace=self.settings.resolved_workspace(), source="对话引擎")
+                               workspace=self.settings.resolved_workspace(), source="对话引擎",
+                               extra_roots=[INBOX])
         self.chat_tools = build_tools(self.ctx)
         sync_tool_nodes(self.store, self.chat_tools)
 

@@ -29,15 +29,53 @@ class ToolContext:
     source: str = "工具调用"
     step_id: str = ""   # 当前执行步节点（工具产出经 produced 边挂到该节点）
     task_id: str = ""   # 当前任务节点（任务级证据汇聚用）
+    extra_roots: list = field(default_factory=list)  # 额外沙箱根（inbox 上传区）
+
+    def _contained(self, c: Path) -> bool:
+        c = c.resolve()
+        if c == self.workspace.resolve() or self.workspace.resolve() in c.parents:
+            return True
+        for r in self.extra_roots:
+            rr = Path(r).resolve()
+            if c == rr or rr in c.parents:
+                return True
+        return False
 
     def resolve(self, path: str) -> Path:
-        """沙箱路径解析：相对路径基于 workspace，绝对路径必须落在 workspace 内。"""
+        """沙箱路径解析：相对路径依次尝试 workspace 与 extra_roots（inbox），
+        存在者优先；都不存在时落到 workspace（由工具层报"文件不存在"）。
+        绝对路径必须落在某个沙箱根内。"""
         p = Path(path)
-        root = self.workspace.resolve()
-        full = (p if p.is_absolute() else root / p).resolve()
-        if root not in full.parents and full != root:
-            raise PermissionError(f"沙箱约束：路径越界 {path}（仅允许 workspace 内）")
-        return full
+        cands = [p] if p.is_absolute() else [self.workspace / p] + [Path(r) / p for r in self.extra_roots]
+        if not p.is_absolute():  # 「inbox/xxx」前缀剥离：消息里的路径写法与实际落位对齐
+            inner = str(p).replace("\\", "/")
+            if inner.lower().startswith("inbox/"):
+                cands += [Path(r) / inner[6:] for r in self.extra_roots]
+        fallback = None
+        for c in cands:
+            c = c.resolve()
+            if not self._contained(c):
+                continue
+            if c.exists():
+                return c
+            if fallback is None:
+                fallback = c
+        if fallback is not None:
+            return fallback
+        raise PermissionError(
+            f"沙箱约束：路径越界 {path}（仅允许 工作区 {self.workspace.resolve()} 与上传区 inbox）")
+
+    def rel(self, p: Path) -> str:
+        p = p.resolve()
+        try:
+            return p.relative_to(self.workspace.resolve()).as_posix()
+        except ValueError:
+            for r in self.extra_roots:
+                try:
+                    return f"inbox/{p.relative_to(Path(r).resolve()).as_posix()}"
+                except ValueError:
+                    continue
+        return p.as_posix()
 
 
 @dataclass
@@ -125,8 +163,51 @@ def _t_write_file(ctx: ToolContext, path: str, content: str) -> ToolResult:
 
 
 def _rel(ctx: ToolContext, p: Path) -> str:
-    """workspace 内相对路径（POSIX 风格）。"""
-    return p.relative_to(ctx.workspace.resolve()).as_posix()
+    """workspace 内相对路径（POSIX 风格）；落在 inbox 时带 inbox/ 前缀。"""
+    return ctx.rel(p)
+
+
+def _t_read_pdf(ctx: ToolContext, path: str, max_chars: int = 8000) -> ToolResult:
+    """读论文/PDF：抽取全文，落一份 .txt 供 read_file 深读，正文前段直接回传。"""
+    from pypdf import PdfReader
+
+    p = ctx.resolve(path)
+    if not p.is_file() or p.suffix.lower() != ".pdf":
+        return False, f"不是 PDF 文件：{path}"
+    try:
+        reader = PdfReader(str(p))
+        text = "\n".join((pg.extract_text() or "") for pg in reader.pages)
+    except Exception as e:  # noqa: BLE001
+        return False, f"PDF 解析失败：{e}"
+    if not text.strip():
+        return False, "（PDF 无可提取文本——可能是扫描版，需要 OCR）"
+    txt_path = p.with_suffix(".txt")
+    txt_path.write_text(text, encoding="utf-8")
+    head = "\n".join(text.splitlines()[:60])[:max_chars]
+    return True, (f"[{ctx.rel(p)}] 共 {len(reader.pages)} 页，全文已存 {txt_path.name}（可 read_file 续读）。\n"
+                  f"===== 正文前段 =====\n{head}")
+
+
+def _t_unzip(ctx: ToolContext, path: str, dest: str = "") -> ToolResult:
+    """解压 zip/tar/tar.gz 到同目录 <名称>_extracted/（防 zip-slip）。"""
+    from .uploads import extract_archive
+
+    p = ctx.resolve(path)
+    if not p.is_file():
+        return False, f"文件不存在：{path}"
+    try:
+        extracted, skipped = extract_archive(p)
+    except Exception as e:  # noqa: BLE001
+        return False, f"解压失败：{e}"
+    rel = ctx.rel(p)
+    out = f"已解压 {len(extracted)} 个文件 → {rel.rsplit('.', 1)[0] if '.' in rel else rel}_extracted/"
+    if extracted:
+        out += "\n" + "\n".join(f"- {x}" for x in extracted[:15])
+        if len(extracted) > 15:
+            out += f"\n- …共 {len(extracted)} 个"
+    if skipped:
+        out += f"\n（跳过危险条目：{skipped[:5]}）"
+    return True, out
 
 
 def _t_run_python(ctx: ToolContext, path: str, timeout: float = 60) -> ToolResult:
@@ -350,7 +431,9 @@ def build_tools(ctx: ToolContext) -> Dict[str, Tool]:
     tools = [
         T("list_dir", "列出目录内容（recursive=true 递归浏览整个项目）", {"path": {"type": "string", "required": False, "desc": "相对路径，默认 ."}, "recursive": {"type": "boolean", "required": False}}, _t_list_dir),
         T("find_in_files", "在项目内全局搜索代码行（正则）", {"pattern": {"type": "string", "required": True}, "glob": {"type": "string", "required": False}, "max_results": {"type": "number", "required": False}}, _t_find_in_files),
-        T("read_file", "读取 workspace 内文本文件", {"path": {"type": "string", "required": True, "desc": "相对路径"}}, _t_read_file),
+        T("read_file", "读取文本文件（.txt/.md/.py/.csv 等）", {"path": {"type": "string", "required": True, "desc": "相对路径"}}, _t_read_file),
+        T("read_pdf", "读论文/PDF：抽取全文并存 .txt（inbox 里的上传件直接用）", {"path": {"type": "string", "required": True}, "max_chars": {"type": "number", "required": False}}, _t_read_pdf),
+        T("unzip", "解压 zip/tar 到 <名称>_extracted/", {"path": {"type": "string", "required": True}, "dest": {"type": "string", "required": False}}, _t_unzip),
         T("write_file", "写入 workspace 内文本文件（沙箱）", {"path": {"type": "string", "required": True}, "content": {"type": "string", "required": True}}, _t_write_file, perm="sandbox-write"),
         T("run_python", "运行 workspace 内的 Python 脚本（子进程，60s 超时）", {"path": {"type": "string", "required": True}, "timeout": {"type": "number", "required": False}}, _t_run_python, perm="sandbox-write"),
         T("run_code", "写入并运行一段 Python 代码（一步到位，输出回传）", {"code": {"type": "string", "required": True}, "filename": {"type": "string", "required": False}, "timeout": {"type": "number", "required": False}}, _t_run_code, perm="sandbox-write"),

@@ -34,7 +34,10 @@ class TaskExecutor:
         self.llm = llm
         self.settings = settings
         self.skills: Dict[str, Skill] = {s.name: s for s in (skills or BUILTIN_SKILLS)}
-        self.ctx = ToolContext(store=store, llm=llm, workspace=settings.resolved_workspace())
+        from .uploads import INBOX
+
+        self.ctx = ToolContext(store=store, llm=llm, workspace=settings.resolved_workspace(),
+                               extra_roots=[INBOX])
         self.tools = build_tools(self.ctx)
         self.planner = GraphPlanner(list(self.skills.values()))
 
