@@ -187,6 +187,65 @@ def api_skill_del(name: str):
     return {"ok": remove_user_skill(name)}
 
 
+@app.post("/api/skills/import")
+def api_skill_import(body: dict):
+    from .ext import import_skill_package
+
+    path = str(body.get("path", "")).strip()
+    if not path:
+        raise HTTPException(400, "请提供技能包路径（文件夹或 zip）")
+    try:
+        r = import_skill_package(path)
+        reload_runtime()
+        return {"ok": True, **r}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/mcp/import")
+def api_mcp_import(body: dict):
+    from .ext import import_mcp_json
+
+    text = str(body.get("json", "")).strip()
+    if not text:
+        raise HTTPException(400, "请粘贴 mcpServers JSON 或给出文件路径")
+    try:
+        n, names = import_mcp_json(text)
+        reload_runtime()
+        return {"ok": True, "count": n, "names": names}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/memory/files")
+def api_memory_files():
+    from .ext import list_memory_files
+
+    return {"files": list_memory_files(), "dir": str(MEMORY_DIR)}
+
+
+@app.post("/api/memory/import")
+def api_memory_import(body: dict):
+    from .ext import import_memory_path
+
+    path = str(body.get("path", "")).strip()
+    if not path:
+        raise HTTPException(400, "请提供 md 文件或文件夹路径")
+    try:
+        r = import_memory_path(path)
+        reload_runtime()
+        return {"ok": True, **r}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/memory/files/{name}")
+def api_memory_delete(name: str):
+    from .ext import delete_memory_file
+
+    return {"ok": delete_memory_file(name)}
+
+
 # ---------------------------------------------------------------- 设置 ----
 
 @app.get("/api/models")

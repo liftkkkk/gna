@@ -273,7 +273,7 @@ def build_demo() -> gr.Blocks:
                         with gr.Row():
                             send = gr.Button("发送", variant="primary")
                             clr = gr.Button("清空对话")
-                        auto_gate = gr.Checkbox(value=True, label="自动确认写盘门控")
+                        auto_gate = gr.Checkbox(value=True, label="自动执行写入与运行（不勾选 = 只读浏览，写入/运行将被拒绝）")
                     with gr.Column(scale=2):
                         trace = gr.Markdown("### 🧭 运行轨迹\n（发送消息后显示：召回 → 路由 → 工具/计划 → ΔW 写回）")
             with gr.Tab("🧠 图谱世界"):

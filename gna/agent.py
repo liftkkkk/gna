@@ -254,7 +254,7 @@ class AgentRuntime:
                 yield {"t": "trace", "line": f"未知工具 {action}，已提示重试"}
                 continue
             if tool.perm == "sandbox-write" and not allow_write:
-                obs = "⛔ 写盘/执行类操作被人工门控拒绝（勾选「自动确认写盘门控」后放行）"
+                obs = "⛔ 写入/运行操作需要自动执行权限（在界面勾选「自动执行写入与运行」后重试）"
                 messages.append({"role": "assistant", "content": raw[:800]})
                 messages.append({"role": "user", "content": f"OBSERVATION: {obs}"})
                 yield {"t": "trace", "line": f"门控拒绝 {action}"}

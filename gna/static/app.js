@@ -137,11 +137,15 @@ async function loadExt() {
   const d = await api("/api/ext");
   $("mcp-list").innerHTML = d.mcp.length
     ? md(d.mcp.map(m => `- **${m.name}**（${m.enabled ? "启用" : "禁用"}）：\`${m.command} ${m.args.join(" ")}\``).join("\n"))
-    : "<p class='muted'>（无——添加后对话中即可直接调用，例如你的 gx-memory）</p>";
+    : "<p class='muted'>（无——粘贴你的 mcpServers JSON 导入，例如 gx-memory）</p>";
   $("skill-list").innerHTML = d.skills.length
     ? md(d.skills.map(s => `- 【${s.name}】${s.description}`).join("\n"))
     : "<p class='muted'>（无）</p>";
   $("mem-dir").textContent = `${d.memory.dir}（${d.memory.count} 条，待入库 ${d.memory.pending}）`;
+  const mf = await api("/api/memory/files");
+  $("mem-files").innerHTML = mf.files.length
+    ? md(mf.files.map(f => `- ${f.name}（${(f.size / 1024).toFixed(1)} KB）${f.ingested ? "✅已入图" : "⏳待入库"}`).join("\n"))
+    : "<p class='muted'>（暂无记忆文件）</p>";
 }
 function extStatus(msg) { $("ext-status").innerHTML = md("✅ " + msg); loadExt(); }
 $("mcp-add").onclick = async () => {
@@ -151,19 +155,46 @@ $("mcp-add").onclick = async () => {
       args: $("mcp-args").value.split(",").map(a => a.trim()).filter(Boolean),
       env: $("mcp-env").value.trim() ? JSON.parse($("mcp-env").value) : {} }) });
     extStatus(d.ok ? `MCP 已注册（${d.tools.length} 个工具：${d.tools.join(", ")}）` : `已保存但连接失败：${d.error}`);
-  } catch (e) { extStatus("失败：" + e.message); }
+  } catch (e) { $("ext-status").innerHTML = md("❌ " + e.message); }
 };
-$("mcp-test").onclick = async () => {
-  const d = await api("/api/mcp/test", { method: "POST", body: JSON.stringify({ name: $("mcp-name").value }) });
-  $("ext-status").innerHTML = md(d.ok ? `✅ 在线，工具：${d.tools.join(", ")}` : `❌ ${d.error}`);
+$("mcp-import").onclick = async () => {
+  try {
+    const d = await api("/api/mcp/import", { method: "POST", body: JSON.stringify({ json: $("mcp-json").value }) });
+    extStatus(`已从 JSON 导入 ${d.count} 个 MCP 服务器：${d.names.join(", ")}（重启前端后工具自动注册）`);
+    refreshStatus();
+  } catch (e) { $("ext-status").innerHTML = md("❌ 导入失败：" + e.message); }
+};
+$("mcp-test-all").onclick = async () => {
+  $("ext-status").innerHTML = "<span class='muted'>测试中…（每个服务器需拉起进程，稍候）</span>";
+  const d = await api("/api/ext");
+  for (const m of d.mcp) {
+    if (!m.enabled) continue;
+    try {
+      const r = await api("/api/mcp/test", { method: "POST", body: JSON.stringify({ name: m.name }) });
+      $("ext-status").innerHTML = md((r.ok ? `✅ ${m.name}：${r.tools.join(", ")}` : `❌ ${m.name}：${r.error}`));
+    } catch (e) { $("ext-status").innerHTML = md(`❌ ${m.name}：${e.message}`); }
+  }
+  loadExt();
 };
 $("mcp-del-btn").onclick = async () => { await api("/api/mcp/" + encodeURIComponent($("mcp-del").value), { method: "DELETE" }); extStatus("已删除"); };
+$("sk-import-btn").onclick = async () => {
+  try {
+    const d = await api("/api/skills/import", { method: "POST", body: JSON.stringify({ path: $("sk-import").value }) });
+    extStatus(`技能包已导入：${d.name}（相关任务自动注入对话）`);
+  } catch (e) { $("ext-status").innerHTML = md("❌ 导入失败：" + e.message); }
+};
 $("sk-add").onclick = async () => {
   await api("/api/skills", { method: "POST", body: JSON.stringify({
     name: $("sk-name").value, description: $("sk-desc").value, body: $("sk-body").value }) });
   extStatus("技能已保存（相关任务自动注入对话）");
 };
 $("sk-del-btn").onclick = async () => { await api("/api/skills/" + encodeURIComponent($("sk-del").value), { method: "DELETE" }); extStatus("已删除"); };
+$("mem-import-btn").onclick = async () => {
+  try {
+    const d = await api("/api/memory/import", { method: "POST", body: JSON.stringify({ path: $("mem-import").value }) });
+    extStatus(`已导入 ${d.imported} 个记忆文件：${d.files.join(", ")}（重启前端后自动入图）`);
+  } catch (e) { $("ext-status").innerHTML = md("❌ 导入失败：" + e.message); }
+};
 $("mem-add").onclick = async () => {
   const d = await api("/api/memory/remember", { method: "POST", body: JSON.stringify({
     title: $("mem-title").value, content: $("mem-content").value }) });

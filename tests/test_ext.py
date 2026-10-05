@@ -87,3 +87,48 @@ def test_memory_folder_idempotent(runtime, tmp_path, monkeypatch):
     assert len(ext.pending_memory_files()) == before - 1
     ext.mark_memory_ingested(f)  # 重复标记无害
     assert len(ext.pending_memory_files()) == before - 1
+
+
+def test_import_mcp_json_three_shapes(monkeypatch, tmp_path):
+    monkeypatch.setattr(ext, "MCP_FILE", tmp_path / "mcp.json")
+    n1, k1 = ext.import_mcp_json('{"mcpServers": {"s1": {"command": "c1", "args": []}}}')
+    n2, k2 = ext.import_mcp_json('{"command": "c2", "name": "s2"}')
+    n3, k3 = ext.import_mcp_json('{"s3": {"command": "c3"}, "ignored": {"x": 1}}')
+    assert (n1, n2, n3) == (1, 1, 1)
+    data = ext.load_mcp()["mcpServers"]
+    assert {"s1", "s2", "s3"} <= set(data)
+
+
+def test_import_skill_package_dir_and_zip(runtime, tmp_path):
+    import io
+    import zipfile
+
+    pkg = tmp_path / "评审技能"
+    pkg.mkdir()
+    (pkg / "SKILL.md").write_text("---\nname: 评审技能\ndescription: 审查\n---\n步骤", encoding="utf-8")
+    r1 = ext.import_skill_package(str(pkg))
+    assert r1["name"] == "评审技能"
+    assert (ext.SKILLS_DIR / "评审技能" / "SKILL.md").exists()
+
+    zbuf = io.BytesIO()
+    with zipfile.ZipFile(zbuf, "w") as z:
+        z.writestr("zipskill/SKILL.md", "---\nname: zipskill\ndescription: 压缩\n---\n内容")
+    zpath = tmp_path / "pack.zip"
+    zpath.write_bytes(zbuf.getvalue())
+    r2 = ext.import_skill_package(str(zpath))
+    assert r2["name"] == "zipskill"
+
+
+def test_memory_import_and_delete(runtime, tmp_path, monkeypatch):
+    monkeypatch.setattr(ext, "MEMORY_DIR", tmp_path / "mem")
+    monkeypatch.setattr(ext, "INGESTED_FILE", tmp_path / "mem" / ".ing.json")
+    folder = tmp_path / "memories"
+    folder.mkdir()
+    (folder / "x.md").write_text("记忆X", encoding="utf-8")
+    (folder / "y.md").write_text("记忆Y", encoding="utf-8")
+    r = ext.import_memory_path(str(folder))
+    assert r["imported"] == 2
+    names = [f["name"] for f in ext.list_memory_files()]
+    assert {"x.md", "y.md"} <= set(names)
+    assert ext.delete_memory_file("x.md")
+    assert "x.md" not in [f["name"] for f in ext.list_memory_files()]

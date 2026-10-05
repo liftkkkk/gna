@@ -238,7 +238,7 @@ def main() -> None:
     st.caption("`一切皆图 · 查找皆遍历 · 变更留痕` ｜ 同一 headless 内核，Gradio / Streamlit 双前端")
     page = st.sidebar.radio("页面", ["💬 对话", "🌐 图谱世界", "📜 行为审计", "⚙️ 模型设置",
                                       "🧩 扩展", "📁 项目目录"], label_visibility="collapsed")
-    auto_gate = st.sidebar.checkbox("自动确认写盘门控", value=True)
+    auto_gate = st.sidebar.checkbox("自动执行写入与运行（不勾选 = 只读浏览）", value=True)
     if page == "💬 对话":
         page_chat(auto_gate)
     elif page == "🌐 图谱世界":
