@@ -10,9 +10,11 @@ GXBackend 注意点（吸取 gx-memory-mcp 修复经验）：
 """
 from __future__ import annotations
 
+import glob
 import os
 import sys
 import uuid
+from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
 EdgeDict = Dict  # {"label","weight","attributes"}
@@ -112,11 +114,21 @@ class GraphBackend:
 # ---------------------------------------------------------------- GX ----
 
 def _load_gx(gx_path: str):
+    """加载 GX 引擎。路径注入是临时的（import 后移除，避免进程级路径污染）。"""
+    injected = False
     if gx_path and gx_path not in sys.path:
         sys.path.insert(0, gx_path)
-    from graph_engine import Graph, Node, Edge  # noqa: 延迟导入
+        injected = True
+    try:
+        from graph_engine import Graph, Node, Edge  # noqa: 延迟导入
 
-    return Graph, Node, Edge
+        return Graph, Node, Edge
+    finally:
+        if injected:
+            try:
+                sys.path.remove(gx_path)
+            except ValueError:
+                pass
 
 
 class GXBackend(GraphBackend):
@@ -382,17 +394,45 @@ class NXBackend(GraphBackend):
 
 # ------------------------------------------------------------ 工厂 ----
 
+def autodetect_gx() -> str:
+    """按常见位置探测 GX 图引擎目录（GX_PATH 环境变量优先，版本号新者优先）。"""
+    import glob as _glob
+
+    cands: List[str] = []
+    env = os.environ.get("GX_PATH")
+    if env:
+        cands.append(env)
+    cands += ["./GX-1.5.3", "./GX", "../GX-1.5.3", "../GX"]
+    for pat in ("D:/Downloads/GX-*", "C:/Downloads/GX-*",
+                os.path.expanduser("~/Downloads/GX-*"), os.path.expanduser("~/GX-*")):
+        cands += sorted(_glob.glob(pat), reverse=True)
+    for c in cands:
+        p = Path(c)
+        if (p / "graph_engine.py").exists():
+            return str(p)
+    return ""
+
+
 def make_backend(gx_path: str | None = None) -> GraphBackend:
-    """GX 为可选引擎：设 GX_PATH 指向 GX-1.5.3 目录即启用；未设置或加载失败
-    自动回退 networkx（功能完整，开源用户零配置即可跑）。GNA_BACKEND=networkx 可强制回退。"""
+    """**GX 图引擎为主后端（最高优先级）**，按以下顺序解析：
+
+    1. 显式 gx_path 参数；
+    2. GX_PATH 环境变量；
+    3. 常见位置自动探测（当前目录/下载目录的 GX-*，GX_PATH 未设置也生效）；
+    4. pip 安装态（GX 已作为包安装进 Python 环境，无需路径）。
+
+    仅当以上全部不可用时才回退 networkx 兜底后端。
+    GNA_BACKEND=networkx 可强制使用兜底。
+    """
     if os.environ.get("GNA_BACKEND", "").lower() == "networkx":
         return NXBackend()
-    path = gx_path or os.environ.get("GX_PATH") or ""
-    if path and not os.path.isdir(path):
-        path = ""
-    if not path:
-        return NXBackend()
-    try:
-        return GXBackend(path)
+    path = gx_path or os.environ.get("GX_PATH") or autodetect_gx()
+    if path and os.path.isdir(path):
+        try:
+            return GXBackend(path)
+        except Exception:
+            pass
+    try:  # pip 安装态：GX 已作为包安装，无需路径
+        return GXBackend("")
     except Exception:
         return NXBackend()
