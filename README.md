@@ -117,8 +117,12 @@ set GX_PATH=D:\path	o\GX-1.5.3     :: 显式指定（通常不需要，会自动
 set GNA_BACKEND=networkx              :: 强制回退 networkx（调试用）
 ```
 
-> 开源仓库本身不包含 GX 引擎代码（GNA 通过适配层在运行时引用它，详见 docs/gx-packaging.md）；
-> 没有 GX 的环境自动回退 networkx，功能完整。
+> 开源仓库本身不包含 GX 引擎代码（GNA 通过适配层在运行时引用它）；没有 GX 的环境自动回退 networkx，功能完整。
+
+**GX 的获取渠道**（取决于 GX 作者的发布方式，详见 docs/gx-packaging.md）：
+1. **pip 安装**（推荐）：GX 发布 PyPI 后 `pip install gx-engine`，GNA 自动识别，无需任何路径设置；
+2. **GitHub 仓库**：从 GX 的公开仓库下载 GX-1.5.3 目录，`setx GX_PATH <路径>`；
+3. **随发行版附带**：GNA Release 中附带 GX 压缩包（需 GX 许可允许分发）。
 
 适配细节：GX 邻接表只存出边（GNA 自建惰性反向索引）；GX 原生序列化丢 `data/embedding`
 （GNA 在 RuntimeGraph 层做全保真 JSON 原子写，不经 GX 的 save()）；存储路径 `GNA_STORAGE`

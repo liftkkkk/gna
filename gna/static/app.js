@@ -21,7 +21,8 @@ async function api(path, opts) {
 async function refreshStatus() {
   try {
     const s = await api("/api/status");
-    $("status-text").textContent = `${s.model} ｜ ${s.project_root ? "项目模式" : "默认沙箱"}`;
+    const engine = s.backend === "gx" ? "GX 引擎" : "networkx 兜底";
+    $("status-text").textContent = `${s.model} ｜ ${engine}${s.project_root ? " ｜ 项目模式" : ""}`;
   } catch { $("status-text").textContent = "内核离线"; }
 }
 

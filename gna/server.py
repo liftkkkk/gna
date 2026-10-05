@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Optional
@@ -311,8 +312,13 @@ def api_project(body: dict):
 
 @app.get("/api/status")
 def api_status():
+    from .backend import autodetect_gx, make_backend
+
     s = load_settings()
-    return {"model": s.model, "provider": s.provider,
+    be = make_backend()
+    gx_path = autodetect_gx() or (str(Path(os.environ.get("GX_PATH"))) if os.environ.get("GX_PATH") else "")
+    return {"model": s.model, "provider": s.provider, "backend": be.name,
+            "backend_path": gx_path if be.name == "gx" else "",
             "workspace": s.resolved_workspace().as_posix(), "project_root": s.project_root,
             "version": "0.1.0"}
 
