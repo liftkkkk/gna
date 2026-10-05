@@ -221,7 +221,7 @@ task:t1 ──logged──▶ ep:1 ──next──▶ ep:2 ──next──▶ 
 
 | 后端 | 说明 | 定位 |
 |---|---|---|
-| `GXBackend` | 加载 `GX_PATH`（默认 `D:/Downloads/GX-1.5.3`）下的 `graph_engine.Graph/Node/Edge`、`GraphSearch`、`GraphUtils`；`SemanticGraph` 思路用于可选语义检索 | 默认，用户自有引擎 |
+| `GXBackend` | 加载 `GX_PATH` 指向的 GX-1.5.3 目录下的 `graph_engine.Graph/Node/Edge`、`GraphSearch`、`GraphUtils`；`SemanticGraph` 思路用于可选语义检索 | 默认，用户自有引擎 |
 | `NXBackend` | networkx MultiDiGraph 等价实现 | 开源回退，零额外依赖 |
 
 适配要点（吸取 gx-memory-mcp 的修复经验）：

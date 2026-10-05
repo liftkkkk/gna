@@ -111,9 +111,14 @@ PLAN: session_start -> read_file -> summarize_text -> extract_facts -> draft_rep
 GNA 默认使用自研图引擎 **GX-1.5.3**（内存图、邻接表、名称索引、Dijkstra、拓扑序、分区/社区发现）：
 
 ```cmd
-set GX_PATH=D:/Downloads/GX-1.5.3     :: 默认即此路径；找不到自动回退 networkx
+:: GX 是可选引擎：不设置 GX_PATH 时自动使用 networkx 后端（功能完整，零配置可跑）。
+:: 想启用自研 GX 图引擎：下载 GX-1.5.3 到任意目录后指向它
+set GX_PATH=D:\path	o\GX-1.5.3
 set GNA_BACKEND=networkx              :: 强制 networkx 后端
 ```
+
+> 开源仓库本身不包含 GX 引擎代码——GNA 的图后端是可插拔的（`gna/backend.py`），
+> 你的 GX 路径通过 `GX_PATH` 注入，拉取本项目的人无需拥有 GX 也能运行。
 
 适配细节：GX 邻接表只存出边（GNA 自建惰性反向索引）；GX 原生序列化丢 `data/embedding`
 （GNA 在 RuntimeGraph 层做全保真 JSON 原子写，不经 GX 的 save()）；存储路径 `GNA_STORAGE`
@@ -127,7 +132,7 @@ set GNA_BACKEND=networkx              :: 强制 networkx 后端
 | `GNA_LLM_API_KEY` / `GNA_LLM_MODEL` / `GNA_LLM_BASE_URL` | 模型接入 | - |
 | `GNA_STORAGE` | 图存储文件 | `~/.gna/runtime.json` |
 | `GNA_WORKSPACE` | 文件工具沙箱根目录 | `~/.gna/workspace` |
-| `GX_PATH` | GX 引擎目录 | `D:/Downloads/GX-1.5.3` |
+| `GX_PATH` | GX 引擎目录（可选，未设 = networkx 后端） | - |
 | `GNA_EMBEDDING_BACKEND` | mock / st / openai（语义召回，可选） | mock |
 
 ## 开发

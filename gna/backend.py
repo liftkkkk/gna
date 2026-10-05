@@ -383,9 +383,14 @@ class NXBackend(GraphBackend):
 # ------------------------------------------------------------ 工厂 ----
 
 def make_backend(gx_path: str | None = None) -> GraphBackend:
-    """优先 GX（设 GX_PATH 或默认 D:/Downloads/GX-1.5.3），失败回退 networkx。"""
-    path = gx_path or os.environ.get("GX_PATH", r"D:/Downloads/GX-1.5.3")
-    if os.environ.get("GNA_BACKEND", "gx").lower() == "networkx":
+    """GX 为可选引擎：设 GX_PATH 指向 GX-1.5.3 目录即启用；未设置或加载失败
+    自动回退 networkx（功能完整，开源用户零配置即可跑）。GNA_BACKEND=networkx 可强制回退。"""
+    if os.environ.get("GNA_BACKEND", "").lower() == "networkx":
+        return NXBackend()
+    path = gx_path or os.environ.get("GX_PATH") or ""
+    if path and not os.path.isdir(path):
+        path = ""
+    if not path:
         return NXBackend()
     try:
         return GXBackend(path)
