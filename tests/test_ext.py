@@ -67,7 +67,8 @@ def test_mcp_tool_registration_end_to_end(runtime, mini_server_path):
     assert ok and "echo: 管线通" in out
 
 
-def test_skill_frontmatter_and_crud(runtime):
+def test_skill_frontmatter_and_crud(runtime, tmp_path, monkeypatch):
+    monkeypatch.setattr(ext, "SKILLS_DIR", tmp_path / "skills")
     f = ext.save_user_skill("代码评审", "PR 审查清单", "1. 先看测试\n2. 再看命名")
     assert f.exists()
     sk = ext.load_user_skills()
@@ -99,7 +100,8 @@ def test_import_mcp_json_three_shapes(monkeypatch, tmp_path):
     assert {"s1", "s2", "s3"} <= set(data)
 
 
-def test_import_skill_package_dir_and_zip(runtime, tmp_path):
+def test_import_skill_package_dir_and_zip(runtime, tmp_path, monkeypatch):
+    monkeypatch.setattr(ext, "SKILLS_DIR", tmp_path / "skills")
     import io
     import zipfile
 

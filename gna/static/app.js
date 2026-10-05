@@ -140,7 +140,7 @@ async function loadExt() {
     : "<p class='muted'>（无——粘贴你的 mcpServers JSON 导入，例如 gx-memory）</p>";
   $("skill-list").innerHTML = d.skills.length
     ? md(d.skills.map(s => `- 【${s.name}】${s.description}`).join("\n"))
-    : "<p class='muted'>（无）</p>";
+    : "<p class='muted'>（尚未安装自定义技能——在下方导入或创建）</p>";
   $("mem-dir").textContent = `${d.memory.dir}（${d.memory.count} 条，待入库 ${d.memory.pending}）`;
   const mf = await api("/api/memory/files");
   $("mem-files").innerHTML = mf.files.length
@@ -204,9 +204,10 @@ $("mem-add").onclick = async () => {
 /* ---------------- 设置 ---------------- */
 async function loadSettings() {
   const d = await api("/api/models");
-  $("profile-list").innerHTML = md(d.profiles.map(p =>
-    `- ${p.id === d.active ? "**▶" : "-"}${p.name}**（${p.model} @ ${p.base_url || "Mock"}）${p.has_key ? "🔑" : ""}`).join("\n"));
-  $("profile-list").innerHTML += md(`\n当前生效：**${d.model}** ｜ 沙箱根：\`${d.workspace}\``);
+  const cur = d.profiles.find(p => p.id === d.active) || {};
+  $("cur-model").innerHTML = `<div><div class="name">${esc(cur.name || d.model)}</div>` +
+    `<div class="meta">${esc(d.model)} ｜ ${esc(cur.base_url || "离线 Mock")}</div></div>` +
+    `<div class="badge">${d.project_root ? "项目模式" : "默认沙箱"}</div>`;
   const sel = $("pf-select");
   sel.innerHTML = d.profiles.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
   sel.value = d.active;
