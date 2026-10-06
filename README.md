@@ -24,7 +24,7 @@ GNA 是一个 **agent runtime**：把 Agent 的**状态、记忆、技能、任�
 pip install gna
 
 :: 方式二：从源码
-git clone https://github.com/zzzlift/gna.git
+git clone https://github.com/liftkkkk/gna.git
 cd gna && pip install .
 ```
 

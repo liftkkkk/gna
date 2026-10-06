@@ -26,7 +26,7 @@ GNA 的图后端是**可插拔**的：**GX 图引擎是主后端（最高优先�
 
 让 GX 自己变成一个 pip 包，GNA 用户 `pip install gx-engine` 后**无需任何路径设置**即被自动识别（make_backend 第 4 步会直接 import）。
 
-**✅ 已完成**：GX 开源仓库已在本地建好 `C:\Users\z1881\gx-engine`（py-modules 布局，`pip install -e .` 与 `python -m build` 双验证通过，PyPI 产物 `gx_engine-1.5.3` whl/sdist 已生成）。仓库结构（py-modules 方案，保持 `import graph_engine` 全局兼容，GNA / gx-memory 零改动）：
+**✅ 已完成**：gx-engine 仓库采用 py-modules 布局（`pip install -e .` 与 `python -m build` 双验证通过，PyPI 产物 `gx_engine-1.5.3` whl/sdist）。仓库结构（py-modules 方案，保持 `import graph_engine` 全局兼容，GNA / gx-memory 零改动）：
 
 ```
 gx-engine/
@@ -36,7 +36,7 @@ gx-engine/
   examples/
 ```
 
-推送 GitHub 后：`git clone https://github.com/zzzlift/gx-engine && cd gx-engine && pip install -e .`
+推送 GitHub 后：`git clone https://github.com/liftkkkk/gx-engine && cd gx-engine && pip install -e .`
 
 若未来改用包目录布局（`gx_engine/` 包），在 GX-1.5.3 目录下新建 `pyproject.toml`（模板如下），然后把 `graph_engine.py` / `graph_rag.py` / `node_embeddings.py` 挪进 `gx_engine/` 包目录：
 
