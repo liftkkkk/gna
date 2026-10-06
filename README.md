@@ -17,14 +17,29 @@ GNA 是一个 **agent runtime**：把 Agent 的**状态、记忆、技能、任�
 | **约束在搜索前生效** | 约束节点经 `constrains` 边声明 `deny_skill:`（规划前封锁）/ `restrict:`（沙箱强制）/ `gate:`（人工门控） |
 | **能直接干活（执行型）** | `run_code`（写入并运行）/ `run_python`：LLM 生成的程序落盘 `workspace/scripts/`、子进程执行（60s 超时）、输出回传，报错自我修复；每次执行以 `tool_call` 事件与 `written:/ran:` 断言上图 |
 
-## 30 秒上手
+## 安装与上手
 
 ```cmd
-:: Windows cmd（anaconda python）
-cd graph-native-agent
-pip install networkx pytest
-set GNA_LLM_PROVIDER=mock
-python -m gna demo
+:: 方式一（推荐）：从 PyPI（发布后）
+pip install gna
+
+:: 方式二：从源码
+git clone https://github.com/zzzlift/gna.git
+cd gna && pip install .
+```
+
+基础依赖（networkx / fastapi / uvicorn / openai）随安装自动带上，**装完即可用**。
+旧版界面（Gradio / Streamlit）与可视化需额外安装：`pip install "gna-graph-native-agent[web-legacy,viz]"`。
+
+```cmd
+gna demo                :: 一键验证安装（离线 Mock，无需 Key）
+gna web                 :: 打开界面（默认 http://127.0.0.1:8000）
+                        :: 首次使用：进「设置」页填模型 Key（或先用 Mock）；
+                        :: 进「扩展」页可导入 MCP 服务器 / 自定义技能
+gna chat                :: 命令行交互
+```
+
+可选：启用自研 GX 图引擎作主后端（见下节）。
 
 python -m gna chat            :: 交互式 REPL（/help 看命令）
 python -m gna graph stats     :: 图统计

@@ -20,21 +20,25 @@ classifiers = [
 ]
 dependencies = [
     "networkx>=3.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "openai>=1.40",
 ]
 
 [project.optional-dependencies]
-llm = ["openai>=1.40"]
+web-legacy = ["gradio>=4.44", "streamlit>=1.36", "pyvis>=0.3"]
 viz = ["pyvis>=0.3"]
-web = ["gradio>=4.44", "pyvis>=0.3"]
-web-st = ["streamlit>=1.36"]
 semantic = ["sentence-transformers>=2.2"]
-dev = ["pytest>=8.0", "openai>=1.40", "pyvis>=0.3"]
+dev = ["pytest>=8.0", "pyvis>=0.3"]
 
 [project.scripts]
 gna = "gna.cli:main"
 
 [tool.setuptools]
 packages = ["gna"]
+
+[tool.setuptools.package-data]
+gna = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
