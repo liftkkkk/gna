@@ -1,174 +1,170 @@
-# GNA · 图原生智能体运行时（Graph-Native Agent）
+# GNA · Graph-Native Agent Runtime
 
-> **一切皆图，一切查找皆图遍历，一切变更留痕。**
-> 给 LLM 一张随时能查、能改、能回放的"世界地图"——Agent 的脑子长在图上。
+**English** | [简体中文](README.zh-CN.md)
 
-GNA 是一个 **agent runtime**：把 Agent 的**状态、记忆、技能、任务、约束、审计**全部组织在**同一张内存图**上，
-上层接任何 OpenAI 兼容大模型（GLM / DeepSeek / Kimi / OpenAI / Ollama / 自定义，无 Key 可跑 Mock），
-底层支持自研图引擎 [GX](#gx-引擎集成) 与 networkx 双后端。
+> **Everything is a graph. Every lookup is a graph traversal. Every change leaves a trace.**
+> Give your LLM a live "world map" it can query, mutate and replay — the agent's brain lives on the graph.
 
-## 图原生四判据（与"图当配件"的分界）
+GNA is an **agent runtime**: the agent's **state, memory, skills, tasks, constraints and audit trail** all live on **one in-memory graph**. On top it speaks to any OpenAI-compatible LLM (GLM / DeepSeek / Kimi / OpenAI / Ollama / custom — or run keyless with Mock); underneath, it supports the self-developed [GX graph engine](#gx-engine-integration) with a networkx fallback.
 
-| 判据 | GNA 的落实 |
+## The four graph-native criteria (substrate vs. accessory)
+
+| Criterion | How GNA delivers it |
 |---|---|
-| **状态在图上可寻址** | 当前世界状态 = 有效断言（fact 节点）集合，任何状态问题都是一次图遍历 |
-| **证据链在图上可追溯** | 每个节点/边携带 `ts + source`；结论沿 `produced/states` 边回溯到回合或工具返回 |
-| **行动与技能可机器验证** | 技能节点携带前置/效果**断言模板**，执行前后自动核对（支持通配/参数合一） |
-| **约束在搜索前生效** | 约束节点经 `constrains` 边声明 `deny_skill:`（规划前封锁）/ `restrict:`（沙箱强制）/ `gate:`（人工门控） |
-| **能直接干活（执行型）** | `run_code`（写入并运行）/ `run_python`：LLM 生成的程序落盘 `workspace/scripts/`、子进程执行（60s 超时）、输出回传，报错自我修复；每次执行以 `tool_call` 事件与 `written:/ran:` 断言上图 |
+| **State is addressable on the graph** | The current world state = the set of valid assertions (fact nodes); every state question is one graph traversal |
+| **Evidence chains are traceable** | Every node/edge carries `ts + source`; conclusions backtrack along `produced/states` edges to the turn or tool response |
+| **Actions & skills are machine-verifiable** | Skill nodes carry precondition/effect **assertion templates**, checked automatically before and after execution (wildcards + parameter unification) |
+| **Constraints fire before the search** | Constraint nodes declare `deny_skill:` (blocked at planning) / `restrict:` (sandbox-enforced) / `gate:` (human approval) via `constrains` edges |
+| **It does real work** | `run_code` (write & run) / `run_python`: LLM-written programs land in `workspace/scripts/`, execute as a subprocess (60s timeout), stream output back, and self-repair on errors; every execution lands on the graph as a `tool_call` event plus `written:/ran:` assertions |
+| **Extensible ecosystem** | Custom MCP tools in the standard `mcpServers` JSON format and custom skills in the ZCode `SKILL.md` format — configured on the web Extensions page |
 
-## 安装与上手
+## Install & quick start
 
 ```cmd
-:: 方式一（推荐）：从 PyPI（发布后）
+:: Option 1 (recommended, once published): from PyPI
 pip install gna
 
-:: 方式二：从源码
+:: Option 2: from source
 git clone https://github.com/liftkkkk/gna.git
 cd gna && pip install .
 ```
 
-基础依赖（networkx / fastapi / uvicorn / openai）随安装自动带上，**装完即可用**。
-旧版界面（Gradio / Streamlit）与可视化需额外安装：`pip install "gna-graph-native-agent[web-legacy,viz]"`。
+Core dependencies (networkx / fastapi / uvicorn / openai) are installed automatically — **it works out of the box**.
+The legacy views (Gradio / Streamlit) and graph visualization are extras: `pip install "gna-graph-native-agent[web-legacy,viz]"`.
 
 ```cmd
-gna demo                :: 一键验证安装（离线 Mock，无需 Key）
-gna web                 :: 打开界面（默认 http://127.0.0.1:8000）
-                        :: 首次使用：进「设置」页填模型 Key（或先用 Mock）；
-                        :: 进「扩展」页可导入 MCP 服务器 / 自定义技能
-gna chat                :: 命令行交互
+gna demo                :: one-command end-to-end demo (offline Mock, no API key needed)
+gna web                 :: open the web UI (default http://127.0.0.1:8000)
+                        :: first run: set your model key on the Settings page (or stay on Mock);
+                        :: the Extensions page imports MCP servers / custom skills
+gna chat                :: interactive CLI
 ```
 
-可选：启用自研 GX 图引擎作主后端（见下节）。
-
-python -m gna chat            :: 交互式 REPL（/help 看命令）
-python -m gna graph stats     :: 图统计
-python -m gna graph viz       :: 生成交互式 HTML 可视化（需 pyvis）
-gna web                       :: 自研 HTML 前端（http://127.0.0.1:8000，默认，流式）
-gna web-gradio                :: Gradio 旧版视图   gna web-st :: Streamlit 旧版视图
-```
-
-> 双前端共享同一 headless 内核与 `~/.gna` 图存储；模型配置（多方案、持久化、热切换）见 `~/.gna/models.json`。
-> 注意：v0.2 增量持久化落地前，建议同一时间只用一个前端写入。
-
-接真实大模型（任选其一，其余走 OpenAI 兼容）：
+Connect a real LLM (all providers speak the OpenAI-compatible protocol):
 
 ```cmd
 set GNA_LLM_PROVIDER=zhipu
-set GNA_LLM_API_KEY=你的key
+set GNA_LLM_API_KEY=your-key
 set GNA_LLM_MODEL=glm-4.6
 python -m gna chat
 ```
 
-## 架构
+Optional: enable the self-developed GX graph engine as the primary backend (see below).
+
+## Architecture
 
 ```
-CLI（本期） │ Gradio/Web（规划中） │ MCP（规划中）
-──────────────────────────────────────────────
-AgentRuntime：感知→入图→遍历召回→LLM推理→行动→ΔW写回
-   ├ 对话引擎：ReAct 工具循环（工具含图操作）
-   └ 任务引擎：目标断言化 → 图规划(A*) → 执行器(门控/重规划)
-──────────────────────────────────────────────
-图原生机制层：extract(文本→图谱) │ recall(激活扩散) │
-              tools(工具即图节点) │ skills(技能图) │
-              planner(路径即计划) │ executor(ΔW写回)
-──────────────────────────────────────────────
-RuntimeGraph：类型化节点 │ 断言状态 │ episode 事件时间链 │ 遍历原语 │ 补偿回滚
-──────────────────────────────────────────────
-GXBackend（GX-1.5.3，默认）│ NXBackend（networkx 回退）
+Views (pluggable): CLI │ HTML (default) │ Gradio │ Streamlit │ MCP (planned)
+──────────────────────────────────────────────────────────────────────────
+AgentRuntime: perceive → ingest → traversal recall → LLM reason → act → ΔW write-back
+   ├ Work engine: ReAct tool loop (tools include graph operations)
+   └ Task engine: goal → assertions → graph planning (A*) → executor (gates / replanning)
+──────────────────────────────────────────────────────────────────────────
+Graph-native mechanisms: extract (text→graph) │ recall (spreading activation) │
+   tools (tools-as-nodes) │ skills (skill graph) │
+   planner (path = plan) │ executor (ΔW write-back)
+──────────────────────────────────────────────────────────────────────────
+RuntimeGraph: typed nodes │ assertion state │ episode event chain │ traversal primitives │ compensating rollback
+──────────────────────────────────────────────────────────────────────────
+GXBackend (GX-1.5.3, primary) │ IgraphBackend │ NXBackend (fallback)
 ```
 
-一条示例执行轨迹（`python -m gna run "请整理关于图神经网络的要点，写一份简报并验证"`）：
+A sample execution trace (`python -m gna run "Summarize GNN key points into a brief report and verify it"`):
 
 ```
 PLAN: session_start -> read_file -> summarize_text -> extract_facts -> draft_report -> verify_report
-  [1/6] session_start        OK   （结构技能：仅推进状态断言）
-  [2/6] read_file            OK   读取 notes/图神经网络.md
-  [3/6] summarize_text       OK   要点如下：…
-  [4/6] extract_facts        OK   入图完成：实体 4 条、事实 2 条
-  [5/6] draft_report         OK   报告已起草（引用图谱证据 2 条）  ← 人工门控点
-  [6/6] verify_report        OK   验证通过：2 条证据引用全部可回溯到有效图谱节点
+  [1/6] session_start        OK   (structural skill: advances state assertions only)
+  [2/6] read_file            OK   reads notes/gnn.md
+  [3/6] summarize_text       OK   key points: ...
+  [4/6] extract_facts        OK   4 entities, 2 facts ingested
+  [5/6] draft_report         OK   report drafted (2 graph citations)   <- human gate
+  [6/6] verify_report        OK   all evidence citations resolve to live graph nodes
 ```
 
-## CLI 命令总览
+## CLI overview
 
-| 命令 | 说明 |
+| Command | What it does |
 |---|---|
-| `gna chat` | 交互式 REPL：`/graph` `/facts` `/path A B` `/tools` `/skills` `/rollback` `/reset` |
-| `gna ask "问题"` | 单轮问答 |
-| `gna run "任务"` | 图规划 + 执行（`--yes` 自动确认门控） |
-| `gna demo` | 一键演示（示例知识 → 任务 → 四判据审计输出） |
-| `gna graph stats\|nodes\|edges\|neighbors\|path\|events\|export\|viz` | 图操作（遍历/最短路/事件回放/可视化） |
-| `gna memory add\|query\|facts\|rollback\|clear` | 图记忆（写入走门控：去重/冲突→失效标记） |
-| `gna skill list\|show\|validate\|run` | 技能图（validate 输出 `skills=13 edges=17 acyclic=True components=1`） |
-| `gna tool list\|call` | 原子工具（含沙箱约束演示） |
-| `gna llm info\|test\|set` | LLM 配置与连通性 |
+| `gna web` / `gna web-gradio` / `gna web-st` | three frontends, one kernel (HTML is default) |
+| `gna chat` | interactive REPL: `/graph` `/facts` `/path A B` `/tools` `/skills` `/rollback` `/reset` |
+| `gna ask "question"` | one-shot Q&A |
+| `gna run "task"` | graph planning + execution (`--yes` auto-approves gates) |
+| `gna demo` | end-to-end demo (sample knowledge -> task -> four-criteria audit) |
+| `gna graph stats\|nodes\|edges\|neighbors\|path\|events\|export\|viz` | graph operations |
+| `gna memory add\|query\|facts\|rollback\|clear` | graph memory (writes pass gating: dedup, conflicts -> invalidation) |
+| `gna skill list\|show\|validate\|run` | skill graph (`validate` prints `skills=15 edges=20 acyclic=True components=1`) |
+| `gna mcp list\|add\|remove\|test` / `gna uskill ...` / `gna memory-import` | user extensions (MCP servers, SKILL.md skills, memory files) |
+| `gna workon <dir>` | project mode: point the sandbox at your own codebase |
+| `gna tool list\|call` | atomic tools (sandbox demonstration included) |
+| `gna llm info\|test\|set` | LLM configuration & connectivity |
 
-## 统一图模型（Schema）
+## Unified graph model (schema)
 
-节点 11 类：`entity` 对象 · `fact` 事实/断言 · `turn` 回合 · `task` 任务 · `step` 执行步 ·
-`result` 结果 · `skill` 技能 · `tool` 工具 · `constraint` 约束 · `goal` 目标 · `episode` 事件。
+11 node classes: `entity` · `fact` (assertion) · `turn` · `task` · `step` ·
+`result` · `skill` · `tool` · `constraint` · `goal` · `episode`.
 
-关键边：`mentions`（回合→实体）· `states`（溯源）· `requires` / `has_effect`（断言模板）·
-`enables`（技能依赖，自动推导）· `uses_tool` · `constrains` · `has_step` · `produced`（证据链）·
-`next`（episode 时间链）· `supersedes`（冲突替代）。
+Key edges: `mentions` (turn->entity) · `states` (provenance) · `requires` / `has_effect` (assertion templates) ·
+`enables` (skill dependencies, auto-derived) · `uses_tool` · `constrains` · `has_step` · `produced` (evidence chain) ·
+`next` (episode time chain) · `supersedes` (conflict replacement).
 
-**ΔW 事件溯源**：每个原子变更都是一个 `episode` 节点，串成 `next` 时间链——可回放（`gna graph events`）、
-可回滚（`gna memory rollback`，补偿式失效，历史永不物理删除）。
+**ΔW event sourcing**: every atomic change is an `episode` node chained along `next` edges —
+replayable (`gna graph events`), rollbackable (`gna memory rollback`, compensating invalidation; history is never physically deleted).
 
-## 设计文档
+## Design doc
 
-完整产品设计（公理、Schema、遍历原语映射、运行时循环、GX 集成、Roadmap）见
-[docs/design.md](docs/design.md)。
+The full product design (axioms, schema, traversal-primitive mapping, runtime loop, GX integration, roadmap) lives in
+[docs/design.md](docs/design.md) (Chinese).
 
-## GX 引擎集成
+## GX engine integration
 
-GNA 默认使用自研图引擎 **GX-1.5.3**（内存图、邻接表、名称索引、Dijkstra、拓扑序、分区/社区发现）：
+GNA's primary backend is the self-developed **GX graph engine** (in-memory graphs, adjacency lists, name index, Dijkstra, topological sort, partitioning / community detection):
 
 ```cmd
-:: GX 图引擎为主后端（最高优先级）——GNA 启动时自动探测（GX_PATH → 当前目录 → 下载目录的 GX-*），
-:: 探测到即使用 GX；仅当 GX 不可用时才回退 networkx 兜底。
-set GX_PATH=D:\path	o\GX-1.5.3     :: 显式指定（通常不需要，会自动探测）
-set GNA_BACKEND=networkx              :: 强制回退 networkx（调试用）
+:: GX is the PRIMARY backend (highest priority) - GNA auto-detects it at startup
+:: (GX_PATH -> ./GX-1.5.3 -> download folders matching GX-*); networkx is the fallback.
+set GX_PATH=D:\path\to\GX-1.5.3
+set GNA_BACKEND=networkx              :: force the networkx fallback (debugging)
 ```
 
-> 开源仓库本身不包含 GX 引擎代码（GNA 通过适配层在运行时引用它）；没有 GX 的环境自动回退 networkx，功能完整。
+> This repository does not contain the GX engine source - GNA references it at runtime through an adapter layer;
+> environments without GX fall back to networkx automatically and remain fully functional. See [docs/gx-packaging.md](docs/gx-packaging.md).
 
-**GX 的获取渠道**（取决于 GX 作者的发布方式，详见 docs/gx-packaging.md）：
-1. **pip 安装**（推荐）：GX 发布 PyPI 后 `pip install gx-engine`，GNA 自动识别，无需任何路径设置；
-2. **GitHub 仓库**：从 GX 的公开仓库下载 GX-1.5.3 目录，`setx GX_PATH <路径>`；
-3. **随发行版附带**：GNA Release 中附带 GX 压缩包（需 GX 许可允许分发）。
+**How to get GX** (depends on how the author publishes it):
+1. **pip** (recommended once published): `pip install gx-engine` - GNA detects it automatically, no path setup;
+2. **GitHub**: download the GX-1.5.3 folder from the GX repository, then `setx GX_PATH <path>`;
+3. **Bundled** with a GNA release (if the GX license allows redistribution).
 
-适配细节：GX 邻接表只存出边（GNA 自建惰性反向索引）；GX 原生序列化丢 `data/embedding`
-（GNA 在 RuntimeGraph 层做全保真 JSON 原子写，不经 GX 的 save()）；存储路径 `GNA_STORAGE`
-（默认 `~/.gna/runtime.json`）。
+Adapter details: GX adjacency lists store out-edges only (GNA builds a lazy reverse index); GX's native
+serialization drops `data/embedding` (GNA does full-fidelity atomic JSON writes at the RuntimeGraph layer,
+bypassing GX's `save()`); storage path `GNA_STORAGE` (default `~/.gna/runtime.json`).
 
-## 配置
+## Configuration
 
-| 环境变量 | 说明 | 默认 |
+| Environment variable | Purpose | Default |
 |---|---|---|
-| `GNA_LLM_PROVIDER` | mock / zhipu / deepseek / moonshot / openai / ollama / custom | mock |
-| `GNA_LLM_API_KEY` / `GNA_LLM_MODEL` / `GNA_LLM_BASE_URL` | 模型接入 | - |
-| `GNA_STORAGE` | 图存储文件 | `~/.gna/runtime.json` |
-| `GNA_WORKSPACE` | 文件工具沙箱根目录 | `~/.gna/workspace` |
-| `GX_PATH` | GX 引擎目录（**主后端**，自动探测；networkx 仅为兜底） | 自动探测 |
-| `GNA_EMBEDDING_BACKEND` | mock / st / openai（语义召回，可选） | mock |
+| `GNA_LLM_PROVIDER` | mock / zai / zhipu / deepseek / moonshot / openai / ollama / custom | mock |
+| `GNA_LLM_API_KEY` / `GNA_LLM_MODEL` / `GNA_LLM_BASE_URL` | model access | - |
+| `GNA_STORAGE` | graph store file | `~/.gna/runtime.json` |
+| `GNA_WORKSPACE` | sandbox root for file tools | `~/.gna/workspace` |
+| `GX_PATH` | GX engine directory (**primary backend**, auto-detected; networkx is the fallback) | auto-detect |
+| `GNA_EMBEDDING_BACKEND` | mock / st / openai (semantic recall, optional) | mock |
 
-## 开发
+## Development
 
-```cmd
+```bash
 pip install -e ".[dev]"
-python -m pytest -q          :: 35 个用例（双后端/规划/执行/审计/CLI 冒烟，全离线）
+python -m pytest -q          :: 65 tests (dual backends / planning / execution / audit / CLI smoke, fully offline)
 python examples/quickstart.py
 ```
 
 ## Roadmap
 
-- [x] **v0.1 Core + CLI**：单图运行时、双引擎、GX 双后端、事件溯源/回滚、技能图 13 节点
-- [ ] v0.2 前端：Gradio 多页（对话 / 图谱世界 / 执行审计 / 设置）
-- [ ] v0.3 多智能体图拓扑（链/树/DAG/网），消息历史外化为共享执行图
-- [ ] v0.4 自演化：经验图热启动规划、技能健康度自动升降权、轨迹→技能提取
-- [ ] v0.5 MCP server 化、技能包导入导出、GraphML 互通
+- [x] **v0.1 Core + CLI**: single-graph runtime, dual engines, dual backends, event sourcing / rollback, 15-skill graph
+- [x] **v0.1.x Executable kernel**: run_code / run_python, project mode, uploads & path references, MCP tools, user skills, memory folder, three frontends
+- [ ] **v0.2 Substrate delivery**: incremental persistence + same-task benchmark (graph substrate vs. context-stuffing baseline)
+- [ ] v0.3 Multi-agent graph topologies (chain / tree / DAG / mesh), shared execution graph
+- [ ] v0.4 Self-evolution: experience-graph warm-start planning, skill-health auto-weighting, trajectory->skill extraction
+- [ ] v0.5 MCP server mode, skill packs, GraphML interop
 
 ## License
 
@@ -176,19 +172,20 @@ MIT
 
 ---
 
-## ☕ 请作者喝杯咖啡
+## Buy me a coffee
 
-GNA · 图原生智能体运行时是我在业余时间独立开发和维护的开源项目，永久免费。
+GNA · Graph-Native Agent Runtime is an open-source project I develop and maintain in my spare time, free forever.
 
-如果它帮你把智能体的状态、记忆、审计管明白了，或者让你省下了搭 Agent 框架的时间，
-可以考虑请我喝杯咖啡（¥9.9 就够 ☕）—— 你的每一份支持都会直接转化为新功能开发和 bug 修复的动力。
+If it helped you bring order to your agent's state, memory and audit trail - or saved you the time of wiring
+together an agent framework - consider buying me a coffee (9.9 CNY is enough). Every bit of support goes
+straight into new features and bug fixes.
 
 <p align="center">
-  <img src="icon.jpg" alt="赞赏码 - 请作者喝咖啡" width="280">
+  <img src="icon.jpg" alt="Buy me a coffee" width="280">
 </p>
 
-<p align="center"><i>扫码赞赏时可以留言你最想要的功能，我会优先安排 😉</i></p>
+<p align="center"><i>Leave a note with your donation about the feature you want most - I prioritize those ;)</i></p>
 
-**不方便赞赏？** 给项目点个 ⭐ Star、提一个 Issue、或把它分享给需要的人，同样是巨大的支持！
+**Can't donate?** Starring the repo, opening an Issue, or sharing it with someone who needs it helps just as much!
 
 ---
