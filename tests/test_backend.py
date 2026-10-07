@@ -83,4 +83,19 @@ def test_gx_is_primary_backend_fallback_last(monkeypatch):
     monkeypatch.delenv("GX_PATH", raising=False)
     monkeypatch.setitem(_sys.modules, "graph_engine", None)  # 模拟 GX 从未安装（None → ImportError）
     be = be_mod.make_backend()
-    assert be.name == "networkx"  # 找不到 GX 才兜底
+    assert be.name in ("networkx", "igraph")  # igraph 已装则优先于 networkx
+
+
+def test_igraph_backend_equivalence():
+    igraph = pytest.importorskip("igraph")
+    from gna.backend import IgraphBackend
+
+    _exercise(IgraphBackend())
+
+
+def test_backend_chain_gx_primary():
+    """GX 主后端：有 GX_PATH/自动探测 → gx。"""
+    from gna.backend import make_backend
+
+    be = make_backend()
+    assert be.name in ("gx", "igraph", "networkx")

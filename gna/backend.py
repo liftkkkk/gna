@@ -10,6 +10,7 @@ GXBackend 注意点（吸取 gx-memory-mcp 修复经验）：
 """
 from __future__ import annotations
 
+import json
 import glob
 import os
 import sys
@@ -255,26 +256,26 @@ class GXBackend(GraphBackend):
         self._rev, self._rev_dirty = {}, True
 
     def shortest_path(self, src, dst):
-        import networkx as nx
+        """用 GX 自带的缓存化 Dijkstra（不再临时转 networkx）。"""
+        from graph_engine import GraphSearch
 
-        g = nx.DiGraph()
-        for e in self._g.get_all_edges():
-            g.add_edge(e.source.id, e.target.id, weight=float(e.weight or 1.0))
         try:
-            return nx.shortest_path(g, src, dst, weight="weight")
-        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            r = GraphSearch().cached_dijkstra(self._g, src, dst)
+            path = list(r.get("path") or [])
+            if not path or (len(path) == 1 and src != dst) \
+                    or r.get("distance") in (float("inf"), None):
+                return None  # 不可达
+            return path
+        except Exception:
             return None
 
     def topological_order(self):
-        import networkx as nx
+        """用 GX 自带的拓扑排序。"""
+        from graph_engine import GraphUtils
 
-        g = nx.DiGraph()
-        g.add_nodes_from(self._g.nodes.keys())
-        for e in self._g.get_all_edges():
-            g.add_edge(e.source.id, e.target.id)
         try:
-            return list(nx.topological_sort(g))
-        except nx.NetworkXUnfeasible:
+            return GraphUtils().topological_sort(self._g)
+        except Exception:
             return None
 
 
@@ -392,6 +393,167 @@ class NXBackend(GraphBackend):
             return None
 
 
+# ---------------------------------------------------------- igraph ----
+
+class IgraphBackend(GraphBackend):
+    """igraph（C 核心）高性能后端——GX 不可用时的第二梯队。"""
+
+    name = "igraph"
+
+    def __init__(self):
+        import igraph
+
+        self._igraph = igraph
+        self._g = igraph.Graph(directed=True)
+        self._g.vs["name"] = []
+        self._g.es["label"] = []
+        self._g.es["weight"] = 1.0
+        self._g.es["attributes"] = "{}"
+
+    def _v(self, node_id):
+        try:
+            return self._g.vs.find(name=node_id)
+        except Exception:
+            return None
+
+    def add_node(self, node_id, name, class_, data="", attributes=None, embedding=None):
+        if self._v(node_id) is not None:
+            return "exists"
+        self._g.add_vertex(name=node_id, gna_name=name or node_id, gna_class=class_ or "",
+                           gna_data=data, gna_attrs=json.dumps(attributes or {}, ensure_ascii=False),
+                           gna_embedding=json.dumps(embedding) if embedding else "")
+        return "created"
+
+    def get_node(self, node_id):
+        v = self._v(node_id)
+        if v is None:
+            return None
+        return {"id": node_id, "name": v["gna_name"], "class_": v["gna_class"],
+                "data": v["gna_data"], "attributes": json.loads(v["gna_attrs"] or "{}"),
+                "embedding": json.loads(v["gna_embedding"]) if v["gna_embedding"] else None,
+                "weight": 1.0}
+
+    def update_node(self, node_id, fields):
+        v = self._v(node_id)
+        if v is None:
+            return
+        if isinstance(fields.get("attributes"), dict):
+            cur = json.loads(v["gna_attrs"] or "{}")
+            cur.update(fields["attributes"])
+            v["gna_attrs"] = json.dumps(cur, ensure_ascii=False)
+        for k in ("name", "class_", "data"):
+            if k in fields:
+                v["gna_" + k] = fields[k]
+
+    def remove_node(self, node_id):
+        v = self._v(node_id)
+        if v is not None:
+            self._g.delete_vertices(v)
+
+    def _vname(self, v):
+        """igraph 1.0 兼容：顶点引用可能是 int 索引或 Vertex 对象。"""
+        if isinstance(v, self._igraph.Vertex):
+            return v["name"]
+        return self._g.vs[v]["name"]
+
+    def _edict(self, e):
+        return {"label": e["label"], "weight": float(e["weight"] or 1.0),
+                "attributes": json.loads(e["attributes"] or "{}")}
+
+    def add_edge(self, src, dst, label, weight=1.0, attributes=None):
+        s, t = self._v(src), self._v(dst)
+        if s is None or t is None:
+            return False
+        for e in s.out_edges():
+            if self._vname(e.target) == dst and (e["label"] or "") == (label or ""):
+                return False
+        self._g.add_edge(s.index, t.index, label=label or "", weight=weight,
+                         attributes=json.dumps(attributes or {}, ensure_ascii=False))
+        return True
+
+    def get_edges(self, src, dst):
+        s, t = self._v(src), self._v(dst)
+        if s is None or t is None:
+            return []
+        return [self._edict(e) for e in s.out_edges() if self._vname(e.target) == dst]
+
+    def find_edges(self, src=None, dst=None, label=None):
+        out = []
+        for e in self._g.es:
+            sname = self._g.vs[e.source]["name"]
+            dname = self._g.vs[e.target]["name"]
+            if src and sname != src:
+                continue
+            if dst and dname != dst:
+                continue
+            if label and (e["label"] or "") != label:
+                continue
+            out.append({"src": sname, "dst": dname, "label": e["label"],
+                        "weight": float(e["weight"] or 1.0),
+                        "attributes": json.loads(e["attributes"] or "{}")})
+        return out
+
+    def has_edge(self, src, dst, label=None):
+        if self._v(src) is None or self._v(dst) is None:
+            return False
+        for e in self._g.es:
+            if self._g.vs[e.source]["name"] == src and self._g.vs[e.target]["name"] == dst \
+                    and (label is None or (e["label"] or "") == label):
+                return True
+        return False
+
+    def remove_edges(self, src, dst, label=None):
+        raise NotImplementedError("v0.1 以失效标记代替物理删除（8.1 失效语义）")
+
+    def out_edges(self, node_id):
+        v = self._v(node_id)
+        if v is None:
+            return []
+        return [(self._vname(e.target), self._edict(e)) for e in v.out_edges()]
+
+    def in_edges(self, node_id):
+        v = self._v(node_id)
+        if v is None:
+            return []
+        return [(self._vname(e.source), self._edict(e)) for e in v.in_edges()]
+
+    def nodes(self):
+        return [(v["name"], self.get_node(v["name"])) for v in self._g.vs]
+
+    def node_count(self):
+        return self._g.vcount()
+
+    def edge_count(self):
+        return self._g.ecount()
+
+    def clear(self):
+        self._g = self._igraph.Graph(directed=True)
+        self._g.vs["name"] = []
+        self._g.es["label"] = []
+        self._g.es["weight"] = 1.0
+        self._g.es["attributes"] = "{}"
+
+    def shortest_path(self, src, dst):
+        s, t = self._v(src), self._v(dst)
+        if s is None or t is None:
+            return None
+        try:
+            paths = self._g.get_shortest_paths(s.index, to=t.index, weights="weight", output="vpath")
+            if not paths or not paths[0]:
+                return None
+            return [self._vname(i) for i in paths[0]]
+        except Exception:
+            return None
+
+    def topological_order(self):
+        try:
+            order = self._g.topological_sorting(mode="out")
+            names = self._g.vs["name"]
+            return [names[i] for i in order] if len(order) == self._g.vcount() else None
+        except Exception:
+            return None
+
+
 # ------------------------------------------------------------ 工厂 ----
 
 def autodetect_gx() -> str:
@@ -421,11 +583,10 @@ def make_backend(gx_path: str | None = None) -> GraphBackend:
     3. 常见位置自动探测（当前目录/下载目录的 GX-*，GX_PATH 未设置也生效）；
     4. pip 安装态（GX 已作为包安装进 Python 环境，无需路径）。
 
-    仅当以上全部不可用时才回退 networkx 兜底后端。
-    GNA_BACKEND=networkx 可强制使用兜底。
+    GX 不可用时依此降级：igraph（若已安装，性能优于 networkx）→ networkx 兜底。
+    GNA_BACKEND 可强制指定：gx / igraph / networkx。
     """
-    if os.environ.get("GNA_BACKEND", "").lower() == "networkx":
-        return NXBackend()
+    forced = os.environ.get("GNA_BACKEND", "").lower()
     path = gx_path or os.environ.get("GX_PATH") or autodetect_gx()
     if path and os.path.isdir(path):
         try:
@@ -435,4 +596,10 @@ def make_backend(gx_path: str | None = None) -> GraphBackend:
     try:  # pip 安装态：GX 已作为包安装，无需路径
         return GXBackend("")
     except Exception:
-        return NXBackend()
+        pass
+    if forced != "networkx":
+        try:  # igraph 第二梯队：C 核心，性能优于 networkx
+            return IgraphBackend()
+        except Exception:
+            pass
+    return NXBackend()
